@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The whole app uses a dark theme: layouts are easier to read on a dark background. -->
+    <style name="Theme.GdsViewer" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/canvas_background</item>
+    </style>
+</resources>

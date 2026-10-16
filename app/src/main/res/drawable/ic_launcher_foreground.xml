@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher icon: a tiny "layout" with an active area (blue), a gate (red) and metal (green). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#B34FC3F7" android:strokeColor="#FF4FC3F7" android:strokeWidth="1.5"
+        android:pathData="M32,46 L76,46 L76,64 L32,64 Z" />
+    <path android:fillColor="#B366BB6A" android:strokeColor="#FF66BB6A" android:strokeWidth="1.5"
+        android:pathData="M30,32 L78,32 L78,38 L30,38 Z M30,72 L78,72 L78,78 L30,78 Z" />
+    <path android:fillColor="#B3EF5350" android:strokeColor="#FFEF5350" android:strokeWidth="1.5"
+        android:pathData="M51,40 L57,40 L57,70 L51,70 Z" />
+</vector>
