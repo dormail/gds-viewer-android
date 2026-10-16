@@ -4,6 +4,23 @@ All notable changes to GDS Viewer. Download APKs from the [Releases page](https:
 
 ## [Unreleased]
 
+## [0.7] - 2026-10-16
+
+### Added
+
+- Large files: layouts of 100-200 MB now open and show completely. A 150 MB standard-cell layout (100 million shapes when expanded) opens in about 2 seconds. The app works like KLayout: the cell hierarchy is kept instead of expanded, only what is on screen is drawn, and shapes smaller than a few pixels are drawn as dots.
+- While a file is read, the progress is shown in MB.
+- A thin progress bar appears at the top when preparing a new view takes a moment.
+
+### Changed
+
+- The APK is now an optimized release build (gds-viewer-0.7.apk instead of …-debug.apk). It installs over earlier versions as usual and is much faster with big layouts.
+- The app now needs OpenGL ES 3.0, which every phone from the last ten years supports.
+
+### Removed
+
+- The "Layout too large — only part of it is shown" warning, since layouts are no longer cut off.
+
 ## [0.6] - 2026-10-16
 
 ### Changed
@@ -71,7 +88,8 @@ First version.
 
 - A crash when opening the layer list.
 
-[Unreleased]: https://github.com/dormail/gds-viewer-android/compare/v0.6...HEAD
+[Unreleased]: https://github.com/dormail/gds-viewer-android/compare/v0.7...HEAD
+[0.7]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.7
 [0.6]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.6
 [0.5]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.5
 [0.4]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.4

@@ -59,10 +59,12 @@ Run these from the project folder:
 
 ```
 export JAVA_HOME=~/Android/jdk ANDROID_HOME=~/Android/Sdk
-./gradlew assembleDebug          # builds app/build/outputs/apk/debug/app-debug.apk
-~/Android/Sdk/platform-tools/adb install -r app/build/outputs/apk/debug/app-debug.apk
+./gradlew assembleRelease        # builds app/build/outputs/apk/release/app-release.apk
+~/Android/Sdk/platform-tools/adb install -r app/build/outputs/apk/release/app-release.apk
 ./gradlew test                   # runs the unit tests
 ```
+
+Use the release build for real files: it is optimized and opens big layouts about 20 times faster than a debug build (`./gradlew assembleDebug`). Both are signed with this computer's debug key, so they install over each other. Before publishing on Google Play, set up a proper release key.
 
 The `adb install` line needs the phone connected over USB with USB debugging enabled, as above. If `adb` cannot see the phone, run `~/Android/Sdk/platform-tools/adb devices` and check that the phone is listed as `device` (not `unauthorized`). If it says `unauthorized`, unlock the phone and accept the debugging prompt.
 
@@ -70,32 +72,36 @@ You can also skip `adb`: copy the APK file to the phone (by USB, cloud storage o
 
 ## How it works
 
-For the curious, here is the pipeline in four steps:
+For the curious, here is the pipeline. It works like KLayout: the cell hierarchy is never flattened, so a layout of a few hundred MB fits in a phone's memory even if it would have billions of shapes when expanded.
 
-1. `GdsParser` reads the binary GDSII records and turns them into cells, polygons, paths and references.
-2. `LayoutFlattener` walks the cell hierarchy and applies each instance's transform. It converts paths to polygons and splits every polygon into triangles using `Triangulator` (ear clipping). A cell that is used many times is triangulated once and copied for each use.
-3. The triangles and outlines are uploaded to the GPU once. `LayoutRenderer` (OpenGL ES 2.0) redraws them using a single transformation matrix, so zoom, pan and rotate stay smooth even for large layouts. Fills are semi-transparent and drawn once per layer using the stencil buffer, so overlapping shapes do not get darker.
-4. The user interface is built with Jetpack Compose, in the `ui/` package.
+1. `GdsReader` reads the binary GDSII records into a compact database (`db/`): shapes are stored in packed number arrays per cell, not as one object each. Rectangles, including straight wires, take 20 bytes.
+2. `LibraryIndex` computes every cell's bounding box (per layer too) and splits cells with many shapes into tiles ("chunks") of about 2000 shapes.
+3. `MeshBuilder` turns each chunk into triangles and outlines once (`Triangulator`, `PathGeometry`). The meshes are uploaded to the GPU in batches.
+4. Whenever the view changes a lot, `SceneBuilder` walks the hierarchy in the background. It skips everything off screen, works out directly which elements of an array are visible, and draws anything smaller than about 4 pixels into a per-layer bitmap instead. The result is a "draw list": which chunks to draw, and where.
+5. `SceneRenderer` (OpenGL ES 3.0) draws each chunk once per placement with GPU instancing, so panning and zooming stay smooth. Fills are semi-transparent and drawn once per layer using the stencil buffer, so overlapping shapes do not get darker.
+6. The user interface is built with Jetpack Compose, in the `ui/` package.
 
 ## Project structure
 
 ```
 core/                      plain Kotlin, no Android code
   src/main/kotlin/.../
-    gds/GdsModel.kt        data classes for the layout (cells, shapes, references)
-    gds/GdsParser.kt       reads GDSII binary records
+    db/Library.kt          the compact layout database (cells, packed shape arrays, placements)
+    db/GdsReader.kt        reads GDSII binary records into it
+    scene/LibraryIndex.kt  bounding boxes and per-cell tiles ("chunks")
+    scene/MeshBuilder.kt   chunk to triangles and outlines; MeshCache.kt keeps them until uploaded
+    scene/SceneBuilder.kt  what to draw for the current view (culling, level of detail)
+    scene/Snapping.kt      ruler snapping
+    scene/SceneTypes.kt    the data types shared by these steps
     geometry/Affine.kt     transforms (translate, rotate, mirror, scale)
     geometry/Triangulator.kt  polygon to triangles
-    geometry/PathGeometry.kt  converts GDS paths to polygons
-    geometry/LayoutFlattener.kt  flattens the hierarchy
-    geometry/Snapper.kt    ruler snapping
-    geometry/Buffers.kt    helpers for GPU-ready float buffers
-  src/test/                unit tests
+    geometry/PathGeometry.kt  GDS paths to triangles and outlines
+  src/test/                unit tests (StressBenchmark times big files, see tools/README.md)
 app/                       the Android app
   src/main/
     AndroidManifest.xml
     java/.../MainActivity.kt  entry point
-    java/.../render/LayoutRenderer.kt  OpenGL drawing
+    java/.../render/SceneRenderer.kt  OpenGL drawing
     java/.../ui/ViewerViewModel.kt   app state and logic (survives screen rotation)
     java/.../ui/ViewerScreen.kt      top bar and screens
     java/.../ui/LayoutViewer.kt      layout view, gestures, ruler, scale bar
@@ -105,6 +111,7 @@ app/                       the Android app
     res/                     icons and strings
     assets/sample.gds        built-in sample layout
 tools/make_sample_gds.py   generates the sample layout
+tools/make_stress_gds.py   generates big test layouts (100-200 MB)
 gradle/libs.versions.toml  library versions
 build.gradle.kts           build configuration (root and app)
 settings.gradle.kts        project configuration
@@ -134,15 +141,17 @@ Some words you will see along the way:
 
 ## Limits
 
-- Very large layouts: the app stops converting after about 32 million floats (roughly 128 MB) and shows a warning that only part of the layout is shown. The limit is the constant `DEFAULT_MAX_FLOATS` in `LayoutFlattener`.
-- Coordinates are drawn as 32-bit floats. This is precise enough down to nanometer scale for chips up to a few centimeters across.
+- File size: tested with files of 100-150 MB, including a standard-cell layout with 100 million shapes when expanded. Much bigger files may run out of memory; the app then shows an error.
+- Text labels are not drawn.
+- Coordinates are drawn as 32-bit floats relative to a point near the screen, so they stay precise when zoomed in.
+- The app needs OpenGL ES 3.0, which every phone from the last ten years has.
 
 ## Ideas for next steps
 
 - Draw text labels.
 - Read KLayout `.lyp` layer files for layer names and colors.
 - Custom layer colors chosen in the app.
-- "Open with" from file managers and e-mail attachments.
+- Save the processed index of recent files, so they reopen even faster.
 - Remember the last opened file.
 - Double-tap to zoom.
 - Measuring along edges, and area measurement.
