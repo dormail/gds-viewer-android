@@ -17,15 +17,24 @@ internal object PathGeometry {
      * Appends fill triangles (3 vertices each) to [triangles] and closed outline segments (2
      * points each) to [lines]. Coordinates stay in database units.
      */
-    fun build(path: GdsPath, triangles: DoubleList, lines: DoubleList) {
+    fun build(path: GdsPath, triangles: DoubleList, lines: DoubleList) =
+        build(path.xy, 0, path.xy.size / 2, path.width, path.pathType, path.beginExtension, path.endExtension, triangles, lines)
+
+    /**
+     * Same, for a path given as raw values: [pointCount] center line points starting at point
+     * number [firstPoint] of [xy] (x, y, x, y, ...), with [width] and the GDS path [pathType].
+     */
+    fun build(
+        xy: IntArray, firstPoint: Int, pointCount: Int, width: Int, pathType: Int,
+        beginExtension: Int, endExtension: Int, triangles: DoubleList, lines: DoubleList,
+    ) {
         // Copy the center line, dropping consecutive duplicate points (they have no direction).
-        val src = path.xy
-        val px = DoubleArray(src.size / 2)
-        val py = DoubleArray(src.size / 2)
+        val px = DoubleArray(pointCount)
+        val py = DoubleArray(pointCount)
         var m = 0
-        for (i in 0 until src.size / 2) {
-            val x = src[2 * i].toDouble()
-            val y = src[2 * i + 1].toDouble()
+        for (i in 0 until pointCount) {
+            val x = xy[2 * (firstPoint + i)].toDouble()
+            val y = xy[2 * (firstPoint + i) + 1].toDouble()
             if (m > 0 && px[m - 1] == x && py[m - 1] == y) continue
             px[m] = x
             py[m] = y
@@ -33,7 +42,7 @@ internal object PathGeometry {
         }
         if (m < 2) return
 
-        val hw = abs(path.width.toDouble()) / 2
+        val hw = abs(width.toDouble()) / 2
         if (hw == 0.0) {
             // Zero-width wire: just draw the center line.
             for (i in 0 until m - 1) segment(lines, px[i], py[i], px[i + 1], py[i + 1])
@@ -59,16 +68,16 @@ internal object PathGeometry {
         // Extend the two ends according to the path type.
         val extBegin: Double
         val extEnd: Double
-        when (path.pathType) {
+        when (pathType) {
             2 -> { extBegin = hw; extEnd = hw }
-            4 -> { extBegin = path.beginExtension.toDouble(); extEnd = path.endExtension.toDouble() }
+            4 -> { extBegin = beginExtension.toDouble(); extEnd = endExtension.toDouble() }
             else -> { extBegin = 0.0; extEnd = 0.0 }
         }
         px[0] -= ux[0] * extBegin
         py[0] -= uy[0] * extBegin
         px[m - 1] += ux[segs - 1] * extEnd
         py[m - 1] += uy[segs - 1] * extEnd
-        val round = path.pathType == 1
+        val round = pathType == 1
         val last = segs - 1
 
         // ---- Fill ----

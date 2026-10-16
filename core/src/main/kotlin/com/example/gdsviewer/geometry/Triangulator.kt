@@ -13,6 +13,17 @@ internal object Triangulator {
      * Appends 3 vertices per triangle to [out].
      */
     fun triangulate(pts: DoubleArray, n: Int, out: DoubleList) {
+        val idx = IntList()
+        triangulateIndices(pts, n, idx, 0)
+        for (k in 0 until idx.size) out.add(pts[2 * idx.data[k]], pts[2 * idx.data[k] + 1])
+    }
+
+    /**
+     * Like [triangulate], but appends 3 indices per triangle to [out] instead of coordinates. An
+     * index is the point's number in [pts] plus [base] (the vertex number of point 0 in the mesh).
+     * Appends nothing for polygons with zero area or more than [MAX_POINTS] points.
+     */
+    fun triangulateIndices(pts: DoubleArray, n: Int, out: IntList, base: Int) {
         if (n < 3 || n > MAX_POINTS) return
 
         // Shoelace formula: positive = counter-clockwise.
@@ -23,19 +34,17 @@ internal object Triangulator {
         }
         if (area2 == 0.0) return
         if (n == 3) {
-            out.add(pts[0], pts[1]); out.add(pts[2], pts[3]); out.add(pts[4], pts[5])
+            out.add(base, base + 1, base + 2)
             return
         }
 
         if (isConvex(pts, n, area2 > 0)) {
             for (i in 1 until n - 1) {
-                out.add(pts[0], pts[1])
-                out.add(pts[2 * i], pts[2 * i + 1])
-                out.add(pts[2 * i + 2], pts[2 * i + 3])
+                out.add(base, base + i, base + i + 1)
             }
             return
         }
-        earClip(pts, n, area2 > 0, out)
+        earClip(pts, n, area2 > 0, out, base)
     }
 
     /** True if every turn goes the same way as the polygon's orientation (or is straight). */
@@ -50,7 +59,7 @@ internal object Triangulator {
         return true
     }
 
-    private fun earClip(pts: DoubleArray, n: Int, ccw: Boolean, out: DoubleList) {
+    private fun earClip(pts: DoubleArray, n: Int, ccw: Boolean, out: IntList, base: Int) {
         // Work on a counter-clockwise copy so "convex vertex" always means cross > 0.
         val x = DoubleArray(n)
         val y = DoubleArray(n)
@@ -83,7 +92,7 @@ internal object Triangulator {
                 emit = cross > 0
             }
             if (remove) {
-                if (emit) emitTriangle(x, y, p, cur, q, out)
+                if (emit) emitTriangle(ccw, n, base, p, cur, q, out)
                 next[p] = q
                 prev[q] = p
                 remaining--
@@ -97,12 +106,13 @@ internal object Triangulator {
             val p = prev[cur]
             val q = next[cur]
             val cross = (x[cur] - x[p]) * (y[q] - y[cur]) - (y[cur] - y[p]) * (x[q] - x[cur])
-            if (cross > 0) emitTriangle(x, y, p, cur, q, out)
+            if (cross > 0) emitTriangle(ccw, n, base, p, cur, q, out)
         }
     }
 
-    private fun emitTriangle(x: DoubleArray, y: DoubleArray, a: Int, b: Int, c: Int, out: DoubleList) {
-        out.add(x[a], y[a]); out.add(x[b], y[b]); out.add(x[c], y[c])
+    /** Emits a triangle given by positions in the counter-clockwise working copy as indices of the original points. */
+    private fun emitTriangle(ccw: Boolean, n: Int, base: Int, a: Int, b: Int, c: Int, out: IntList) {
+        if (ccw) out.add(base + a, base + b, base + c) else out.add(base + n - 1 - a, base + n - 1 - b, base + n - 1 - c)
     }
 
     /**
@@ -134,4 +144,37 @@ internal object Triangulator {
     /** Positive if (px, py) is left of the directed line a -> b. */
     private fun side(ax: Double, ay: Double, bx: Double, by: Double, px: Double, py: Double): Double =
         (bx - ax) * (py - ay) - (by - ay) * (px - ax)
+}
+
+/** A growable list of ints (no boxing). */
+internal class IntList(capacity: Int = 64) {
+    var data = IntArray(maxOf(capacity, 4))
+        private set
+    var size = 0
+        private set
+
+    fun add(a: Int) {
+        if (size + 1 > data.size) grow(1)
+        data[size++] = a
+    }
+
+    fun add(a: Int, b: Int) {
+        if (size + 2 > data.size) grow(2)
+        data[size++] = a; data[size++] = b
+    }
+
+    fun add(a: Int, b: Int, c: Int) {
+        if (size + 3 > data.size) grow(3)
+        data[size++] = a; data[size++] = b; data[size++] = c
+    }
+
+    private fun grow(extra: Int) {
+        data = data.copyOf(maxOf(data.size * 2, size + extra))
+    }
+
+    fun clear() {
+        size = 0
+    }
+
+    fun toArray(): IntArray = data.copyOf(size)
 }
