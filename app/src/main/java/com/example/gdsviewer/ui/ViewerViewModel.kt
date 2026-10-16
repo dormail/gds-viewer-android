@@ -21,9 +21,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sign
 
 /** What the main screen is currently showing. */
 sealed interface ViewerState {
@@ -57,6 +59,11 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     var ruler: Ruler? by mutableStateOf(null); private set
     var rotationLocked by mutableStateOf(false); private set
     var snapEnabled by mutableStateOf(true); private set
+
+    // Rotation snapping (see onTransform). The view starts "held" at 0 degrees.
+    private var rotationHeld = true // true = view is held at a snap angle
+    private var pendingRotation = 0.0 // twist collected while held, in degrees
+    private var snapArmed = false // after breaking out, snapping only works once we moved away
 
     private var loadJob: Job? = null
     private var viewportW = 0
@@ -194,14 +201,83 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         val cx = (geo.minX + geo.maxX) / 2
         val cy = (geo.minY + geo.maxY) / 2
         view = Affine.translate(viewportW / 2.0, viewportH / 2.0) * Affine.scale(s, -s) * Affine.translate(-cx, -cy)
+        rotationHeld = true
+        pendingRotation = 0.0
     }
 
     /**
      * Applies one frame of a pinch/pan/rotate gesture around the screen point (cx, cy):
      * pan in pixels, zoom as a factor, rotation in degrees (clockwise on screen).
+     *
+     * Rotation "sticks" at multiples of 90 degrees: while [rotationHeld] the twist is collected in
+     * [pendingRotation] and the view does not turn until it exceeds [BREAKOUT_DEG]. Once free, the
+     * view follows the fingers and snaps back onto a snap angle when it comes within [SNAP_DEG].
      */
     fun onTransform(cx: Double, cy: Double, panX: Double, panY: Double, zoom: Double, rotationDeg: Double) {
-        val geo = geometry ?: return
+        if (geometry == null) return
+        var rot = 0.0
+        if (!rotationLocked) {
+            if (rotationHeld) {
+                pendingRotation += rotationDeg
+                if (abs(pendingRotation) > BREAKOUT_DEG) {
+                    // Broke out: apply only the part beyond the limit so the view does not jump.
+                    rot = pendingRotation - sign(pendingRotation) * BREAKOUT_DEG
+                    rotationHeld = false
+                    snapArmed = false
+                    pendingRotation = 0.0
+                }
+            } else {
+                rot = rotationDeg
+            }
+        }
+        applyTransform(cx, cy, panX, panY, zoom, rot)
+        if (!rotationLocked && !rotationHeld) {
+            val d = distanceToSnapAngle()
+            if (d > ARM_DEG) snapArmed = true // the view has moved away far enough to snap again
+            if (snapArmed && d < SNAP_DEG) snapOnto(cx, cy)
+        }
+    }
+
+    /** Zooms by [factor] around the screen point (cx, cy), respecting the zoom limits. */
+    fun zoomAround(cx: Double, cy: Double, factor: Double) {
+        applyTransform(cx, cy, 0.0, 0.0, factor, 0.0)
+    }
+
+    /** Rotates the view by [deg] around (cx, cy) without any snapping (used by animations). */
+    fun rotateAround(cx: Double, cy: Double, deg: Double) {
+        applyTransform(cx, cy, 0.0, 0.0, 1.0, deg)
+    }
+
+    /**
+     * Call when all fingers are lifted. If the view is free and close to a snap angle, returns the
+     * rotation (degrees) the caller should animate with [rotateAround]; then call [settleRotation].
+     * Returns null if nothing needs to happen.
+     */
+    fun onGestureEnd(): Double? {
+        pendingRotation = 0.0
+        if (rotationLocked || rotationHeld) return null
+        if (distanceToSnapAngle() >= RELEASE_SNAP_DEG) return null
+        return nearestSnapAngle() - view.rotationDegrees
+    }
+
+    /** Finishes a snap animation: puts the rotation exactly on the snap angle and holds it there. */
+    fun settleRotation() {
+        snapOnto(viewportW / 2.0, viewportH / 2.0)
+    }
+
+    fun viewportCenterX() = viewportW / 2.0
+    fun viewportCenterY() = viewportH / 2.0
+
+    /** The one place that changes [view]: view = T(c) * R(rot) * S(zoom) * T(-c + pan) * view. */
+    private fun applyTransform(cx: Double, cy: Double, panX: Double, panY: Double, zoom: Double, rotationDeg: Double) {
+        val z = clampZoom(zoom)
+        view = Affine.translate(cx, cy) * Affine.rotate(rotationDeg) * Affine.scale(z) *
+            Affine.translate(-cx + panX, -cy + panY) * view
+    }
+
+    /** Limits a zoom factor so the resulting scale stays within the allowed range. */
+    private fun clampZoom(zoom: Double): Double {
+        val geo = geometry ?: return zoom
         val current = view.scale
         // Zoom limits: between 5% of the "fit" scale and 500 px per database unit.
         val fitScale = 0.9 * min(
@@ -210,16 +286,30 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         )
         val minScale = 0.05 * fitScale
         val maxScale = 500.0 / geo.dbUnitMicrons
-        val z = (current * zoom).coerceIn(min(minScale, maxScale), maxScale) / current
-        val rot = if (rotationLocked) 0.0 else rotationDeg
-        view = Affine.translate(cx, cy) * Affine.rotate(rot) * Affine.scale(z) *
-            Affine.translate(-cx + panX, -cy + panY) * view
+        return (current * zoom).coerceIn(min(minScale, maxScale), maxScale) / current
+    }
+
+    /** The multiple of 90 degrees closest to the current rotation. */
+    private fun nearestSnapAngle(): Double = Math.round(view.rotationDegrees / SNAP_STEP_DEG) * SNAP_STEP_DEG
+
+    /** Angular distance (0..45 degrees) from the current rotation to the nearest snap angle. */
+    private fun distanceToSnapAngle(): Double = abs(view.rotationDegrees - nearestSnapAngle())
+
+    /** Rotates exactly onto the nearest snap angle about (cx, cy) and holds it there. */
+    private fun snapOnto(cx: Double, cy: Double) {
+        // Built from the actual current angle, so the result is exact (to rounding error).
+        val correction = nearestSnapAngle() - view.rotationDegrees
+        view = Affine.translate(cx, cy) * Affine.rotate(correction) * Affine.translate(-cx, -cy) * view
+        rotationHeld = true
+        pendingRotation = 0.0
     }
 
     fun resetRotation() {
         val cx = viewportW / 2.0
         val cy = viewportH / 2.0
         view = Affine.translate(cx, cy) * Affine.rotate(-view.rotationDegrees) * Affine.translate(-cx, -cy) * view
+        rotationHeld = true
+        pendingRotation = 0.0
     }
 
     fun toggleRotationLock() {
@@ -288,10 +378,6 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         dragNew = false
         dragEnd = 0
         if (r == null || end == 0) return
-        if (wasNew && hypot(view.mapX(r.x2, r.y2) - view.mapX(r.x1, r.y1), view.mapY(r.x2, r.y2) - view.mapY(r.x1, r.y1)) < 8) {
-            ruler = null // a tap clears the ruler
-            return
-        }
         val geo = geometry ?: return
         if (!snapEnabled) return
         val visible = layers.filter { it.visible }.map { it.key }.toSet()
@@ -310,6 +396,13 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private companion object {
+        // Rotation snapping: the snap angles are all multiples of SNAP_STEP_DEG (0, 90, 180, -90).
+        const val SNAP_STEP_DEG = 90.0
+        const val BREAKOUT_DEG = 20.0 // twist needed to leave a snap angle
+        const val ARM_DEG = 10.0 // after breaking out, move this far away before snapping is armed
+        const val SNAP_DEG = 4.0 // while twisting: snap when this close to a snap angle
+        const val RELEASE_SNAP_DEG = 8.0 // on release: animate onto a snap angle when this close
+
         val PALETTE = intArrayOf(
             0xFF4FC3F7.toInt(), 0xFFEF5350.toInt(), 0xFF66BB6A.toInt(), 0xFFFFCA28.toInt(),
             0xFFAB47BC.toInt(), 0xFFFF7043.toInt(), 0xFF26C6DA.toInt(), 0xFFD4E157.toInt(),

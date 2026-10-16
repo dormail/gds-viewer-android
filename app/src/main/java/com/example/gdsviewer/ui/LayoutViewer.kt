@@ -1,6 +1,9 @@
 package com.example.gdsviewer.ui
 
 import android.opengl.GLSurfaceView
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -23,7 +26,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -45,6 +50,9 @@ import com.example.gdsviewer.R
 import com.example.gdsviewer.render.LayerStyle
 import com.example.gdsviewer.render.LayoutRenderer
 import java.util.Locale
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlin.math.exp
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -52,6 +60,9 @@ import kotlin.math.hypot
 import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.pow
+
+private const val ANIM_MS = 250 // duration of zoom / snap animations
+private const val TWO_FINGER_TAP_MS = 300L // max time for a two-finger tap
 
 /** The layout drawing (OpenGL) with touch handling and overlays (ruler, scale bar, compass). */
 @Composable
@@ -87,6 +98,36 @@ fun LayoutViewer(vm: ViewerViewModel) {
         }
     }
 
+    // Animations run in a coroutine scope with a frame clock; a new touch cancels them.
+    val scope = rememberCoroutineScope()
+    val animJob = remember { mutableStateOf<Job?>(null) }
+    val animSpec = tween<Float>(durationMillis = ANIM_MS, easing = FastOutSlowInEasing)
+
+    // Animated zoom by [factor] around [center]: each frame applies only the step since the last one.
+    fun animateZoom(factor: Double, center: Offset) {
+        animJob.value?.cancel()
+        animJob.value = scope.launch {
+            var last = 0f
+            animate(0f, 1f, animationSpec = animSpec) { t, _ ->
+                vm.zoomAround(center.x.toDouble(), center.y.toDouble(), factor.pow((t - last).toDouble()))
+                last = t
+            }
+        }
+    }
+
+    // Animated rotation by [deg] around the screen center, then lock exactly onto the snap angle.
+    fun animateRotation(deg: Double) {
+        animJob.value?.cancel()
+        animJob.value = scope.launch {
+            var last = 0f
+            animate(0f, 1f, animationSpec = animSpec) { t, _ ->
+                vm.rotateAround(vm.viewportCenterX(), vm.viewportCenterY(), deg * (t - last))
+                last = t
+            }
+            vm.settleRotation()
+        }
+    }
+
     val grabRadius = with(density) { 40.dp.toPx() }
     val snapRadius = with(density) { 24.dp.toPx() }
 
@@ -109,22 +150,50 @@ fun LayoutViewer(vm: ViewerViewModel) {
                 .fillMaxSize()
                 .onSizeChanged { vm.onViewportChanged(it.width, it.height) }
                 .pointerInput(Unit) {
+                    // Remembered between gestures, to recognise a double-tap.
+                    var lastTapUpTime = -1L
+                    var lastTapPos = Offset.Zero
+                    val slop = viewConfiguration.touchSlop
+                    val quickZoomPx = 120.dp.toPx() // finger travel that doubles the zoom (x e)
+
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        var measuring = vm.rulerMode
-                        if (measuring) vm.rulerDown(down.position.x, down.position.y, grabRadius)
+                        animJob.value?.cancel() // a new touch stops any running animation
+                        val downTime = down.uptimeMillis
+                        // Is this touch the second tap of a double-tap?
+                        val isSecondTap = lastTapUpTime >= 0 &&
+                            downTime - lastTapUpTime <= viewConfiguration.doubleTapTimeoutMillis &&
+                            (down.position - lastTapPos).getDistance() <= slop * 4
+                        val anchor = lastTapPos // quick zoom keeps the first tap's point fixed
+                        lastTapUpTime = -1L
+
+                        val downPositions = mutableMapOf(down.id to down.position)
+                        var maxPointers = 1
+                        var moved = false // some finger went beyond the touch slop
+                        var multi = false // two or more fingers were down at some point
+                        var panning = false // single finger has passed the slop: pan / ruler drag
+                        var measuring = false // a ruler drag is running
+                        var quickZoom = false // double-tap-and-slide zoom is running
+                        var upTime = downTime
+
                         while (true) {
                             val event = awaitPointerEvent()
+                            upTime = event.changes.maxOf { it.uptimeMillis }
                             val pressed = event.changes.filter { it.pressed }
                             if (pressed.isEmpty()) break
-                            if (measuring && pressed.size > 1) {
-                                vm.rulerCancel()
-                                measuring = false
+                            for (c in pressed) {
+                                val start = downPositions.getOrPut(c.id) { c.position }
+                                if ((c.position - start).getDistance() > slop) moved = true
                             }
-                            if (measuring) {
-                                val p = event.changes.firstOrNull { it.id == down.id } ?: pressed.first()
-                                vm.rulerMove(p.position.x, p.position.y)
-                            } else {
+                            maxPointers = max(maxPointers, pressed.size)
+
+                            if (pressed.size >= 2) {
+                                // Two or more fingers: pinch / pan / rotate right away.
+                                if (measuring) vm.rulerCancel()
+                                measuring = false
+                                quickZoom = false
+                                multi = true
+                                panning = true
                                 val c = event.calculateCentroid(useCurrent = true)
                                 if (c != Offset.Unspecified) {
                                     val pan = event.calculatePan()
@@ -135,10 +204,57 @@ fun LayoutViewer(vm: ViewerViewModel) {
                                         event.calculateRotation().toDouble(),
                                     )
                                 }
+                            } else {
+                                val p = pressed.first()
+                                if (!panning && !quickZoom) {
+                                    // Wait until the finger has really moved before doing anything.
+                                    val dy = p.position.y - down.position.y
+                                    if (isSecondTap && !multi && abs(dy) > slop) {
+                                        quickZoom = true
+                                    } else if ((p.position - down.position).getDistance() > slop) {
+                                        panning = true
+                                        if (vm.rulerMode && !multi) {
+                                            vm.rulerDown(down.position.x, down.position.y, grabRadius)
+                                            measuring = true
+                                        }
+                                    }
+                                } else if (quickZoom) {
+                                    // Sliding down zooms in, up zooms out (like Google Maps).
+                                    val dy = p.position.y - p.previousPosition.y
+                                    vm.zoomAround(anchor.x.toDouble(), anchor.y.toDouble(), exp(dy / quickZoomPx).toDouble())
+                                } else if (measuring) {
+                                    vm.rulerMove(p.position.x, p.position.y)
+                                } else {
+                                    val pan = event.calculatePan()
+                                    vm.onTransform(
+                                        p.position.x.toDouble(), p.position.y.toDouble(),
+                                        pan.x.toDouble(), pan.y.toDouble(), 1.0, 0.0,
+                                    )
+                                }
                             }
                             event.changes.forEach { it.consume() }
                         }
                         if (measuring) vm.rulerUp(snapRadius)
+
+                        val duration = upTime - downTime
+                        if (maxPointers == 2 && !moved && duration <= TWO_FINGER_TAP_MS && downPositions.size == 2) {
+                            // Two-finger tap: zoom out around the midpoint of the two fingers.
+                            val c = downPositions.values.reduce { a, b -> a + b } / 2f
+                            animateZoom(0.5, c)
+                        } else if (maxPointers == 1 && !moved && !panning && !quickZoom &&
+                            duration <= viewConfiguration.longPressTimeoutMillis
+                        ) {
+                            if (isSecondTap) {
+                                animateZoom(2.0, down.position) // double-tap: zoom in
+                            } else {
+                                lastTapUpTime = upTime // first tap: remember it
+                                lastTapPos = down.position
+                            }
+                        }
+
+                        // After the twist: maybe glide onto the nearest snap angle.
+                        val snapDeg = vm.onGestureEnd()
+                        if (snapDeg != null) animateRotation(snapDeg)
                     }
                 },
         )
@@ -243,7 +359,7 @@ private fun androidx.compose.foundation.layout.BoxScope.RulerAndScaleOverlay(vm:
         }
     } else if (vm.rulerMode) {
         Text(
-            "Drag to measure · two fingers to move",
+            "Drag to measure · double-tap to zoom · two fingers to move",
             color = Color(0xFFBBBBBB), style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
         )
