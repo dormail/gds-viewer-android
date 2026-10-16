@@ -30,7 +30,9 @@ class LayoutRenderer : GLSurfaceView.Renderer {
     /** World (µm, y up) to screen pixels (y down). */
     @Volatile var view: Affine = Affine.IDENTITY
 
-    private val background = 0xFF101014.toInt()
+    /** Canvas color (ARGB) and opacity of shape fills; set from the UI thread, read by the GL thread. */
+    @Volatile var background = 0xFF101014.toInt()
+    @Volatile var fillAlpha = 0.4f
 
     private var program = 0
     private var matrixLocation = 0
@@ -101,7 +103,7 @@ class LayoutRenderer : GLSurfaceView.Renderer {
             GLES20.glEnable(GLES20.GL_STENCIL_TEST)
             GLES20.glStencilFunc(GLES20.GL_NOTEQUAL, stencilRef, 0xFF)
             GLES20.glStencilOp(GLES20.GL_KEEP, GLES20.GL_KEEP, GLES20.GL_REPLACE)
-            setColor(style.color, 0.4f)
+            setColor(style.color, fillAlpha)
             draw(layer.fill, GLES20.GL_TRIANGLES)
 
             GLES20.glDisable(GLES20.GL_STENCIL_TEST)

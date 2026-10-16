@@ -9,6 +9,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.gdsviewer.data.RecentFile
+import com.example.gdsviewer.data.ThemeMode
+import com.example.gdsviewer.ui.theme.LayerPalette
 import com.example.gdsviewer.data.RecentFiles
 import com.example.gdsviewer.gds.GdsLibrary
 import com.example.gdsviewer.gds.GdsParser
@@ -37,8 +39,8 @@ sealed interface ViewerState {
     data object Ready : ViewerState
 }
 
-/** One layer as shown in the UI. [color] is ARGB. */
-data class LayerUi(val key: LayerKey, val color: Int, val visible: Boolean, val shapeCount: Long)
+/** One layer as shown in the UI. Its color is [com.example.gdsviewer.ui.theme.LayerPalette] entry [paletteIndex]. */
+data class LayerUi(val key: LayerKey, val paletteIndex: Int, val visible: Boolean, val shapeCount: Long)
 
 /** A measuring line between two points, in world coordinates (µm). */
 data class Ruler(val x1: Double, val y1: Double, val x2: Double, val y2: Double)
@@ -68,6 +70,14 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     var layers: List<LayerUi> by mutableStateOf(emptyList()); private set
 
     private val recents = RecentFiles(application)
+
+    /** The saved theme choice (System default / Light / Dark). */
+    var themeMode: ThemeMode by mutableStateOf(ThemeMode.load(application)); private set
+
+    fun chooseTheme(mode: ThemeMode) {
+        themeMode = mode
+        ThemeMode.save(getApplication(), mode)
+    }
 
     /** Recently opened files, newest first. */
     val recentFiles: List<RecentFile> get() = recents.entries
@@ -183,7 +193,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         geometry = geo
         layers = geo.layers.map { lg ->
             val index = lib.layers.indexOf(lg.key).coerceAtLeast(0)
-            LayerUi(lg.key, PALETTE[index % PALETTE.size], previous[lg.key] ?: true, lg.shapeCount)
+            LayerUi(lg.key, index % LayerPalette.size, previous[lg.key] ?: true, lg.shapeCount)
         }
         ruler = null
         dragEnd = 0
@@ -455,11 +465,5 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         const val SNAP_DEG = 4.0 // while twisting: snap when this close to a snap angle
         const val RELEASE_SNAP_DEG = 8.0 // on release: animate onto a snap angle when this close
 
-        val PALETTE = intArrayOf(
-            0xFF4FC3F7.toInt(), 0xFFEF5350.toInt(), 0xFF66BB6A.toInt(), 0xFFFFCA28.toInt(),
-            0xFFAB47BC.toInt(), 0xFFFF7043.toInt(), 0xFF26C6DA.toInt(), 0xFFD4E157.toInt(),
-            0xFFEC407A.toInt(), 0xFF8D6E63.toInt(), 0xFF5C6BC0.toInt(), 0xFF9CCC65.toInt(),
-            0xFFFFA726.toInt(), 0xFF7E57C2.toInt(), 0xFF29B6F6.toInt(), 0xFFBDBDBD.toInt(),
-        )
     }
 }

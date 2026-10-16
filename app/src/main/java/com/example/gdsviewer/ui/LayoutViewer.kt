@@ -49,6 +49,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.gdsviewer.R
 import com.example.gdsviewer.render.LayerStyle
 import com.example.gdsviewer.render.LayoutRenderer
+import com.example.gdsviewer.ui.theme.LayerPalette
+import com.example.gdsviewer.ui.theme.LocalDarkTheme
+import com.example.gdsviewer.ui.theme.canvasColor
+import com.example.gdsviewer.ui.theme.canvasColorInt
 import java.util.Locale
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -71,6 +75,7 @@ fun LayoutViewer(vm: ViewerViewModel) {
     val density = LocalDensity.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
+    val dark = LocalDarkTheme.current
     val renderer = remember { LayoutRenderer() }
     val glView = remember {
         GLSurfaceView(context).apply {
@@ -138,7 +143,11 @@ fun LayoutViewer(vm: ViewerViewModel) {
             update = {
                 // State read here is tracked: when it changes, this block runs again.
                 renderer.geometry = vm.geometry
-                renderer.styles = vm.layers.map { LayerStyle(it.key, it.color, it.visible) }
+                renderer.background = canvasColorInt(dark)
+                renderer.fillAlpha = LayerPalette.fillAlpha(dark)
+                renderer.styles = vm.layers.map {
+                    LayerStyle(it.key, LayerPalette.color(it.paletteIndex, dark), it.visible)
+                }
                 renderer.view = vm.view
                 glView.requestRender()
             },
@@ -290,7 +299,7 @@ fun LayoutViewer(vm: ViewerViewModel) {
         if (geo != null && geo.isEmpty) {
             Text(
                 "Cell ${geo.cellName} contains no shapes",
-                color = Color.White, modifier = Modifier.align(Alignment.Center),
+                color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.align(Alignment.Center),
             )
         }
     }
@@ -303,7 +312,13 @@ private fun androidx.compose.foundation.layout.BoxScope.RulerAndScaleOverlay(vm:
     val view = vm.view
     val ruler = vm.ruler
     val dbUnit = vm.geometry?.dbUnitMicrons ?: 0.001
-    val textColor = Color.White
+    val dark = LocalDarkTheme.current
+    val textColor = MaterialTheme.colorScheme.onSurface
+    val subtleColor = MaterialTheme.colorScheme.onSurfaceVariant
+    // Ruler colors: a bright line with a dark halo on the dark canvas, the reverse on the light one.
+    val lineColor = if (dark) Color.White else Color(0xFF212121)
+    val haloColor = if (dark) Color(0xCC000000) else Color(0xCCFFFFFF)
+    val canvasBg = canvasColor(dark)
 
     // Scale bar: pick a "nice" length (1, 2 or 5 x 10^k µm) close to 100 dp on screen.
     val scale = view.scale // pixels per µm
@@ -315,13 +330,13 @@ private fun androidx.compose.foundation.layout.BoxScope.RulerAndScaleOverlay(vm:
         if (ruler != null) {
             val p1 = Offset(view.mapX(ruler.x1, ruler.y1).toFloat(), view.mapY(ruler.x1, ruler.y1).toFloat())
             val p2 = Offset(view.mapX(ruler.x2, ruler.y2).toFloat(), view.mapY(ruler.x2, ruler.y2).toFloat())
-            // Dark outline first so the white line is visible on any background.
-            drawLine(Color(0xCC000000), p1, p2, strokeWidth = 5.dp.toPx(), cap = StrokeCap.Round)
-            drawLine(Color.White, p1, p2, strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+            // Halo first so the line is visible on any background.
+            drawLine(haloColor, p1, p2, strokeWidth = 5.dp.toPx(), cap = StrokeCap.Round)
+            drawLine(lineColor, p1, p2, strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
             for (p in listOf(p1, p2)) {
-                drawCircle(Color(0xCC000000), radius = 7.dp.toPx(), center = p)
-                drawCircle(Color.White, radius = 5.dp.toPx(), center = p)
-                drawCircle(Color(0xFF101014), radius = 2.dp.toPx(), center = p)
+                drawCircle(haloColor, radius = 7.dp.toPx(), center = p)
+                drawCircle(lineColor, radius = 5.dp.toPx(), center = p)
+                drawCircle(canvasBg, radius = 2.dp.toPx(), center = p)
             }
         }
     }
@@ -332,9 +347,9 @@ private fun androidx.compose.foundation.layout.BoxScope.RulerAndScaleOverlay(vm:
         Canvas(Modifier.size(width = with(density) { barPx.toDp() }, height = 10.dp)) {
             val y = size.height / 2
             val w = 2.dp.toPx()
-            drawLine(Color.White, Offset(0f, y), Offset(size.width, y), strokeWidth = w)
-            drawLine(Color.White, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = w)
-            drawLine(Color.White, Offset(size.width, 0f), Offset(size.width, size.height), strokeWidth = w)
+            drawLine(textColor, Offset(0f, y), Offset(size.width, y), strokeWidth = w)
+            drawLine(textColor, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = w)
+            drawLine(textColor, Offset(size.width, 0f), Offset(size.width, size.height), strokeWidth = w)
         }
     }
 
@@ -344,7 +359,7 @@ private fun androidx.compose.foundation.layout.BoxScope.RulerAndScaleOverlay(vm:
         val dy = ruler.y2 - ruler.y1
         Card(
             modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xE6202028)),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f)),
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
@@ -353,14 +368,14 @@ private fun androidx.compose.foundation.layout.BoxScope.RulerAndScaleOverlay(vm:
                 )
                 Text(
                     String.format(Locale.ROOT, "dx %.${decimals}f   dy %.${decimals}f µm", abs(dx), abs(dy)),
-                    color = Color(0xFFBBBBBB), style = MaterialTheme.typography.bodySmall,
+                    color = subtleColor, style = MaterialTheme.typography.bodySmall,
                 )
             }
         }
     } else if (vm.rulerMode) {
         Text(
             "Drag to measure · double-tap to zoom · two fingers to move",
-            color = Color(0xFFBBBBBB), style = MaterialTheme.typography.bodySmall,
+            color = subtleColor, style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
         )
     }

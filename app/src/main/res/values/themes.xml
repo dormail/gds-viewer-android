@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The whole app uses a dark theme: layouts are easier to read on a dark background. -->
-    <style name="Theme.GdsViewer" parent="android:Theme.Material.NoActionBar">
+    <!-- Light by default; values-night/themes.xml makes it dark when the phone is in dark mode.
+         The window background is only visible for a moment before Compose draws. -->
+    <style name="Theme.GdsViewer" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/canvas_background</item>
     </style>
 </resources>

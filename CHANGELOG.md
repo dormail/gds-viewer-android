@@ -4,9 +4,15 @@ All notable changes to GDS Viewer. Download APKs from the [Releases page](https:
 
 ## [Unreleased]
 
-### Added (in progress)
+## [0.5] - 2026-10-16
 
-- Theme option: System default, Light or Dark.
+### Added
+
+- Theme option under ⋮ → Theme: System default (the default), Light or Dark. The layout canvas follows the theme; in light mode it has a white background and darker layer colors that stay readable on white.
+
+### Fixed
+
+- The "remove" (×) button in the recent files list was hard to see on the dark background.
 
 ## [0.4] - 2026-10-16
 
@@ -59,7 +65,8 @@ First version.
 
 - A crash when opening the layer list.
 
-[Unreleased]: https://github.com/dormail/gds-viewer-android/compare/v0.4...HEAD
+[Unreleased]: https://github.com/dormail/gds-viewer-android/compare/v0.5...HEAD
+[0.5]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.5
 [0.4]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.4
 [0.3]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.3
 [0.2]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.2

@@ -9,6 +9,7 @@ GDS Viewer is a read-only GDSII layout viewer for Android phones and tablets. Op
 - Open `.gds` and `.gds.gz` files with the system file picker.
 - Recent files: the last 8 files are listed on the start screen and under ⋮ > Recent files. Files opened from other apps ("Open with" / "Share") are kept as a private copy (up to 100 MB each).
 - Launcher shortcuts: long-press the app icon to reopen one of your 4 newest files.
+- Theme: ⋮ > Theme switches between System default, Light and Dark. The layout canvas and layer colors follow it.
 - A built-in sample layout, so you can try the app right away.
 - Layer list: tap a layer to show or hide it, long-press to show only that layer, and use All / None to switch everything at once.
 - Pinch to zoom, drag to pan, and twist with two fingers to rotate.

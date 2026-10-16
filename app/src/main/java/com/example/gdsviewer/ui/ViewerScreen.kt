@@ -40,8 +40,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.gdsviewer.R
-
-private val CanvasColor = Color(0xFF101014)
+import com.example.gdsviewer.ui.theme.LocalDarkTheme
+import com.example.gdsviewer.ui.theme.canvasColor
 
 /** The whole screen: top bar, dialogs and the body that depends on [ViewerViewModel.state]. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -54,11 +54,13 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
     var showLayers by remember { mutableStateOf(false) }
     var showCells by remember { mutableStateOf(false) }
     var showRecents by remember { mutableStateOf(false) }
+    var showTheme by remember { mutableStateOf(false) }
+    val canvas = canvasColor(LocalDarkTheme.current)
     var menuOpen by remember { mutableStateOf(false) }
     val ready = vm.state is ViewerState.Ready
 
     Scaffold(
-        containerColor = CanvasColor,
+        containerColor = canvas,
         topBar = {
             TopAppBar(
                 title = {
@@ -120,6 +122,10 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
                                 )
                             }
                             DropdownMenuItem(
+                                text = { Text("Theme…") },
+                                onClick = { menuOpen = false; showTheme = true },
+                            )
+                            DropdownMenuItem(
                                 text = { Text("Open sample layout") },
                                 onClick = { menuOpen = false; vm.openSample() },
                             )
@@ -130,7 +136,7 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
         },
     ) { padding ->
         Box(
-            Modifier.fillMaxSize().background(CanvasColor).padding(padding),
+            Modifier.fillMaxSize().background(canvas).padding(padding),
             contentAlignment = Alignment.Center,
         ) {
             when (val s = vm.state) {
@@ -139,7 +145,7 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
                         painterResource(R.drawable.ic_folder_open), contentDescription = null,
                         modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text("Open a GDSII layout (.gds or .gds.gz)", textAlign = TextAlign.Center, color = Color.White)
+                    Text("Open a GDSII layout (.gds or .gds.gz)", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
                     Button(onClick = openFile) { Text("Open file") }
                     OutlinedButton(onClick = { vm.openSample() }) { Text("Try the sample layout") }
                 }
@@ -148,7 +154,7 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     CircularProgressIndicator()
-                    Text(s.message, color = Color.White)
+                    Text(s.message, color = MaterialTheme.colorScheme.onSurface)
                 }
                 is ViewerState.Failed -> StartColumn(vm, verticalSpacing = 16.dp) {
                     Text(s.message, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
@@ -160,6 +166,7 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
     }
 
     if (showLayers && ready) LayerSheet(vm, onDismiss = { showLayers = false })
+    if (showTheme) ThemeDialog(vm.themeMode, onSelect = { vm.chooseTheme(it); showTheme = false }, onDismiss = { showTheme = false })
     if (showRecents) RecentFilesDialog(vm, onDismiss = { showRecents = false })
     if (showCells && ready) CellPickerDialog(vm, onDismiss = { showCells = false })
 }

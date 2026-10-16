@@ -9,6 +9,9 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.DisposableEffect
+import com.example.gdsviewer.data.ThemeMode
 import androidx.core.content.IntentCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import com.example.gdsviewer.data.RecentShortcuts
@@ -23,12 +26,25 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Draw behind the status/navigation bars; light icons on a transparent background.
-        enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
-        )
-        setContent { GdsViewerTheme { ViewerScreen() } }
+        setContent {
+            val dark = when (vm.themeMode) {
+                ThemeMode.SYSTEM -> isSystemInDarkTheme()
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+            }
+            // Draw behind the status/navigation bars (edge-to-edge). The icons must contrast with
+            // the canvas: light icons for the dark theme, dark icons for the light theme.
+            DisposableEffect(dark) {
+                val bars = if (dark) {
+                    SystemBarStyle.dark(Color.TRANSPARENT)
+                } else {
+                    SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+                }
+                enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
+                onDispose {}
+            }
+            GdsViewerTheme(dark) { ViewerScreen() }
+        }
         // Only on a fresh start: after rotation/folding the ViewModel still holds the document.
         if (savedInstanceState == null) handleIntent(intent)
     }

@@ -51,7 +51,10 @@ fun RecentFilesList(
                     )
                 }
                 IconButton(onClick = { onRemove(file) }) {
-                    Icon(painterResource(R.drawable.ic_close), contentDescription = "Remove from recent files")
+                    Icon(
+                        painterResource(R.drawable.ic_close), contentDescription = "Remove from recent files",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant, // the canvas is not a theme color, so set it
+                    )
                 }
             }
         }

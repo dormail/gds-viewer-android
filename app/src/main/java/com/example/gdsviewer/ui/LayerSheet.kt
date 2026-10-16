@@ -27,6 +27,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import com.example.gdsviewer.ui.theme.LayerPalette
+import com.example.gdsviewer.ui.theme.LocalDarkTheme
 import androidx.compose.ui.unit.dp
 import java.text.NumberFormat
 
@@ -55,7 +57,8 @@ fun LayerSheet(vm: ViewerViewModel, onDismiss: () -> Unit) {
         val numbers = NumberFormat.getIntegerInstance(LocalConfiguration.current.locales[0])
         LazyColumn {
             items(vm.layers, key = { it.key.toString() }) { layer ->
-                val color = Color(layer.color)
+                val dark = LocalDarkTheme.current
+                val color = Color(LayerPalette.color(layer.paletteIndex, dark))
                 ListItem(
                     modifier = Modifier.combinedClickable(
                         onClick = { vm.toggleLayer(layer.key) },
@@ -67,7 +70,7 @@ fun LayerSheet(vm: ViewerViewModel, onDismiss: () -> Unit) {
                             Modifier
                                 .size(24.dp)
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(color.copy(alpha = 0.4f))
+                                .background(color.copy(alpha = LayerPalette.fillAlpha(dark)))
                                 .border(2.dp, color, RoundedCornerShape(4.dp)),
                         )
                     },
