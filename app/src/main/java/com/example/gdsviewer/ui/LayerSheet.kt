@@ -24,11 +24,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import java.text.NumberFormat
-import java.util.Locale
 
 /** Bottom sheet listing all layers: tap toggles visibility, long-press shows only that layer. */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -52,7 +52,7 @@ fun LayerSheet(vm: ViewerViewModel, onDismiss: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
         )
-        val numbers = NumberFormat.getIntegerInstance(Locale.getDefault())
+        val numbers = NumberFormat.getIntegerInstance(LocalConfiguration.current.locales[0])
         LazyColumn {
             items(vm.layers, key = { it.key.toString() }) { layer ->
                 val color = Color(layer.color)
