@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -50,6 +53,7 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
     val openFile = { picker.launch(arrayOf("*/*")) }
     var showLayers by remember { mutableStateOf(false) }
     var showCells by remember { mutableStateOf(false) }
+    var showRecents by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     val ready = vm.state is ViewerState.Ready
 
@@ -109,6 +113,12 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
                                     onClick = { menuOpen = false; vm.toggleSnap() },
                                 )
                             }
+                            if (vm.recentFiles.isNotEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("Recent files…") },
+                                    onClick = { menuOpen = false; showRecents = true },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Open sample layout") },
                                 onClick = { menuOpen = false; vm.openSample() },
@@ -124,11 +134,7 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
             contentAlignment = Alignment.Center,
         ) {
             when (val s = vm.state) {
-                ViewerState.Empty -> Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.padding(24.dp),
-                ) {
+                ViewerState.Empty -> StartColumn(vm, verticalSpacing = 12.dp) {
                     Icon(
                         painterResource(R.drawable.ic_folder_open), contentDescription = null,
                         modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -144,11 +150,7 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
                     CircularProgressIndicator()
                     Text(s.message, color = Color.White)
                 }
-                is ViewerState.Failed -> Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.padding(24.dp),
-                ) {
+                is ViewerState.Failed -> StartColumn(vm, verticalSpacing = 16.dp) {
                     Text(s.message, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
                     Button(onClick = openFile) { Text("Open file") }
                 }
@@ -158,10 +160,43 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
     }
 
     if (showLayers && ready) LayerSheet(vm, onDismiss = { showLayers = false })
+    if (showRecents) RecentFilesDialog(vm, onDismiss = { showRecents = false })
     if (showCells && ready) CellPickerDialog(vm, onDismiss = { showCells = false })
 }
 
 @Composable
 private fun CheckIcon() {
     Icon(painterResource(R.drawable.ic_check), contentDescription = "On")
+}
+
+/**
+ * Shared layout of the start and error screens: [content] (message and buttons) followed by the
+ * recent files, if there are any. Scrolls when it does not fit and is at most 480dp wide.
+ */
+@Composable
+private fun StartColumn(
+    vm: ViewerViewModel,
+    verticalSpacing: androidx.compose.ui.unit.Dp,
+    content: @Composable () -> Unit,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(verticalSpacing),
+        modifier = Modifier.widthIn(max = 480.dp).verticalScroll(rememberScrollState()).padding(24.dp),
+    ) {
+        content()
+        val recent = vm.recentFiles
+        if (recent.isNotEmpty()) {
+            Text(
+                "Recent files", style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 16.dp).align(Alignment.Start),
+            )
+            RecentFilesList(
+                recent,
+                onOpen = { vm.openRecent(it.id) },
+                onRemove = { vm.removeRecent(it.id) },
+            )
+        }
+    }
 }

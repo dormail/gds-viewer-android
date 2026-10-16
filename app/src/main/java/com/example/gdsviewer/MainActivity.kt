@@ -10,6 +10,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.core.content.IntentCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import com.example.gdsviewer.data.RecentShortcuts
 import com.example.gdsviewer.ui.ViewerScreen
 import com.example.gdsviewer.ui.ViewerViewModel
 import com.example.gdsviewer.ui.theme.GdsViewerTheme
@@ -38,8 +40,14 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
     }
 
-    /** Opens the file from an "Open with" (VIEW) or "Share" (SEND) intent; ignores a normal launch. */
+    /** Opens the file from an "Open with" (VIEW), "Share" (SEND) or launcher-shortcut intent; ignores a normal launch. */
     private fun handleIntent(intent: Intent?) {
+        if (intent?.action == RecentShortcuts.ACTION_OPEN_RECENT) {
+            val id = intent.getStringExtra(RecentShortcuts.EXTRA_ID) ?: return
+            ShortcutManagerCompat.reportShortcutUsed(this, id) // lets the launcher rank shortcuts
+            vm.openRecent(id)
+            return
+        }
         val uri: Uri? = when (intent?.action) {
             Intent.ACTION_VIEW -> intent.data
             Intent.ACTION_SEND ->

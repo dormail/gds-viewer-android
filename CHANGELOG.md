@@ -6,9 +6,15 @@ All notable changes to GDS Viewer. Download APKs from the [Releases page](https:
 
 ### Added (in progress)
 
-- Recent files list on the start screen and in the ⋮ menu.
-- Recent files as shortcuts when you long-press the app icon.
 - Theme option: System default, Light or Dark.
+
+## [0.4] - 2026-10-16
+
+### Added
+
+- Recent files: your last 8 files are listed on the start screen and under ⋮ → Recent files. Tap one to reopen it, or × to remove it.
+- Long-press the app icon on the home screen to open one of your 4 most recent files directly.
+- Files opened via "Open with" or "Share" (where Android only grants temporary access) are kept as a private copy (up to 100 MB each, 300 MB in total) so they can be reopened later.
 
 ## [0.3] - 2026-10-16
 
@@ -53,7 +59,8 @@ First version.
 
 - A crash when opening the layer list.
 
-[Unreleased]: https://github.com/dormail/gds-viewer-android/compare/v0.3...HEAD
+[Unreleased]: https://github.com/dormail/gds-viewer-android/compare/v0.4...HEAD
+[0.4]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.4
 [0.3]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.3
 [0.2]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.2
 [0.1]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.1

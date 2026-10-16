@@ -8,6 +8,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.gdsviewer.data.RecentFile
+import com.example.gdsviewer.data.RecentFiles
 import com.example.gdsviewer.gds.GdsLibrary
 import com.example.gdsviewer.gds.GdsParser
 import com.example.gdsviewer.gds.LayerKey
@@ -41,6 +43,18 @@ data class LayerUi(val key: LayerKey, val color: Int, val visible: Boolean, val 
 /** A measuring line between two points, in world coordinates (µm). */
 data class Ruler(val x1: Double, val y1: Double, val x2: Double, val y2: Double)
 
+/** Where a file came from; decides what [ViewerViewModel] remembers after it loaded. */
+private sealed interface Source {
+    /** The bundled sample: never added to the recent files. */
+    data object Sample : Source
+
+    /** A file chosen by the user (picker, "Open with", "Share"): added to the recent files. */
+    data class External(val uri: Uri) : Source
+
+    /** An entry of the recent files: it is only moved to the top, not copied again. */
+    data class Recent(val id: String) : Source
+}
+
 /**
  * Holds everything the screen shows: the loaded layout, layer settings, the camera ([view]) and
  * the ruler. A ViewModel survives screen rotation, so the layout does not reload.
@@ -52,6 +66,11 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     var library: GdsLibrary? by mutableStateOf(null); private set
     var geometry: LayoutGeometry? by mutableStateOf(null); private set
     var layers: List<LayerUi> by mutableStateOf(emptyList()); private set
+
+    private val recents = RecentFiles(application)
+
+    /** Recently opened files, newest first. */
+    val recentFiles: List<RecentFile> get() = recents.entries
 
     /** Maps world coordinates (µm, y up) to screen pixels (y down). */
     var view: Affine by mutableStateOf(Affine.IDENTITY); private set
@@ -85,15 +104,40 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         } catch (e: Exception) {
             null
         } ?: uri.lastPathSegment ?: "layout"
-        load(name) { resolver.openInputStream(uri) ?: throw java.io.IOException("Cannot open the file.") }
+        load(name, Source.External(uri)) {
+            resolver.openInputStream(uri) ?: throw java.io.IOException("Cannot open the file.")
+        }
+    }
+
+    /** Reopens an entry of [recentFiles]. If its file is gone, shows an error and drops the entry. */
+    fun openRecent(id: String) {
+        val entry = recents.find(id) ?: return
+        load(entry.name, Source.Recent(id)) {
+            try {
+                recents.openStream(entry)
+            } catch (e: java.io.IOException) { // includes FileNotFoundException
+                gone(id)
+            } catch (e: SecurityException) { // access permission was revoked
+                gone(id)
+            }
+        }
+    }
+
+    private fun gone(id: String): Nothing {
+        recents.remove(id) // runs on the IO thread inside load()
+        throw java.io.IOException("This file is no longer available. Open it again from your files.")
+    }
+
+    fun removeRecent(id: String) {
+        viewModelScope.launch(Dispatchers.IO) { recents.remove(id) }
     }
 
     fun openSample() {
         val assets = getApplication<Application>().assets
-        load("sample.gds") { assets.open("sample.gds") }
+        load("sample.gds", Source.Sample) { assets.open("sample.gds") }
     }
 
-    private fun load(name: String, open: () -> java.io.InputStream) {
+    private fun load(name: String, source: Source, open: () -> java.io.InputStream) {
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             try {
@@ -109,6 +153,14 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                     return@launch
                 }
                 buildCell(lib, cell.name, name)
+                // Remember the file only now that it has loaded successfully.
+                withContext(Dispatchers.IO) {
+                    when (source) {
+                        Source.Sample -> Unit
+                        is Source.External -> recents.record(source.uri, name)
+                        is Source.Recent -> recents.touch(source.id)
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: OutOfMemoryError) {

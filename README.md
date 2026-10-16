@@ -2,9 +2,13 @@
 
 GDS Viewer is a read-only GDSII layout viewer for Android phones and tablets. Open a chip layout file from your phone's storage, look at it, zoom and rotate around, measure distances, and switch layers on and off. It does not edit layouts.
 
+**Download:** the latest APK is on the [Releases page](https://github.com/dormail/gds-viewer-android/releases). What changed in each version: [CHANGELOG.md](CHANGELOG.md).
+
 ## Features
 
 - Open `.gds` and `.gds.gz` files with the system file picker.
+- Recent files: the last 8 files are listed on the start screen and under ⋮ > Recent files. Files opened from other apps ("Open with" / "Share") are kept as a private copy (up to 100 MB each).
+- Launcher shortcuts: long-press the app icon to reopen one of your 4 newest files.
 - A built-in sample layout, so you can try the app right away.
 - Layer list: tap a layer to show or hide it, long-press to show only that layer, and use All / None to switch everything at once.
 - Pinch to zoom, drag to pan, and twist with two fingers to rotate.
