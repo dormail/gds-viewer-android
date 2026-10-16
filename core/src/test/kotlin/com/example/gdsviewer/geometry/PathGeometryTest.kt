@@ -1,13 +1,13 @@
 package com.example.gdsviewer.geometry
 
 import com.example.gdsviewer.assertEquals
-import com.example.gdsviewer.gds.GdsPath
-import com.example.gdsviewer.gds.LayerKey
 import org.junit.Test
 
 class PathGeometryTest {
-    private fun path(width: Int, type: Int, bgn: Int, end: Int, vararg xy: Int) =
-        GdsPath(LayerKey(1, 0), width, type, bgn, end, xy)
+    /** A path for the tests: width, GDS path type, extensions and center line points. */
+    private class TestPath(val width: Int, val type: Int, val bgn: Int, val end: Int, val xy: IntArray)
+
+    private fun path(width: Int, type: Int, bgn: Int, end: Int, vararg xy: Int) = TestPath(width, type, bgn, end, xy)
 
     /** Shoelace area of the closed outline given as segments (x1, y1, x2, y2). */
     private fun outlineArea(lines: DoubleList): Double {
@@ -19,10 +19,10 @@ class PathGeometryTest {
         return Math.abs(s) / 2
     }
 
-    private fun build(p: GdsPath): Pair<DoubleList, DoubleList> {
+    private fun build(p: TestPath): Pair<DoubleList, DoubleList> {
         val t = DoubleList()
         val l = DoubleList()
-        PathGeometry.build(p, t, l)
+        PathGeometry.build(p.xy, 0, p.xy.size / 2, p.width, p.type, p.bgn, p.end, t, l)
         return t to l
     }
 

@@ -2,6 +2,8 @@ package com.example.gdsviewer.ui
 
 import android.app.Application
 import android.net.Uri
+import android.os.SystemClock
+import android.util.Log
 import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -12,16 +14,24 @@ import com.example.gdsviewer.data.RecentFile
 import com.example.gdsviewer.data.ThemeMode
 import com.example.gdsviewer.ui.theme.LayerPalette
 import com.example.gdsviewer.data.RecentFiles
-import com.example.gdsviewer.gds.GdsLibrary
-import com.example.gdsviewer.gds.GdsParser
+import com.example.gdsviewer.db.GdsReader
+import com.example.gdsviewer.db.Library
 import com.example.gdsviewer.gds.LayerKey
 import com.example.gdsviewer.geometry.Affine
-import com.example.gdsviewer.geometry.LayoutFlattener
-import com.example.gdsviewer.geometry.LayoutGeometry
-import com.example.gdsviewer.geometry.Snapper
+import com.example.gdsviewer.scene.Box
+import com.example.gdsviewer.scene.CellFrame
+import com.example.gdsviewer.scene.Chunk
+import com.example.gdsviewer.scene.DrawList
+import com.example.gdsviewer.scene.LayerStats
+import com.example.gdsviewer.scene.LibraryIndex
+import com.example.gdsviewer.scene.MeshCache
+import com.example.gdsviewer.scene.SceneBuilder
+import com.example.gdsviewer.scene.SceneRequest
+import com.example.gdsviewer.scene.Snapping
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,8 +49,11 @@ sealed interface ViewerState {
     data object Ready : ViewerState
 }
 
-/** One layer as shown in the UI. Its color is [com.example.gdsviewer.ui.theme.LayerPalette] entry [paletteIndex]. */
-data class LayerUi(val key: LayerKey, val paletteIndex: Int, val visible: Boolean, val shapeCount: Long)
+/**
+ * One layer as shown in the UI. [layer] is its index in [Library.layers]; its color is
+ * [com.example.gdsviewer.ui.theme.LayerPalette] entry [paletteIndex].
+ */
+data class LayerUi(val key: LayerKey, val layer: Int, val paletteIndex: Int, val visible: Boolean, val shapeCount: Long)
 
 /** A measuring line between two points, in world coordinates (µm). */
 data class Ruler(val x1: Double, val y1: Double, val x2: Double, val y2: Double)
@@ -65,9 +78,22 @@ private sealed interface Source {
 class ViewerViewModel(application: Application) : AndroidViewModel(application) {
     var state: ViewerState by mutableStateOf(ViewerState.Empty); private set
     var fileName: String? by mutableStateOf(null); private set
-    var library: GdsLibrary? by mutableStateOf(null); private set
-    var geometry: LayoutGeometry? by mutableStateOf(null); private set
+    var library: Library? by mutableStateOf(null); private set
+    /** The cell being shown and its coordinate frame, or null before a file has loaded. */
+    var frame: CellFrame? by mutableStateOf(null); private set
     var layers: List<LayerUi> by mutableStateOf(emptyList()); private set
+
+    /** What the renderer draws for the current view; rebuilt in the background as the view changes. */
+    var drawList: DrawList? by mutableStateOf(null); private set
+    /** Meshes of the loaded file, shared with the renderer (which uploads them to the GPU). */
+    var meshes: MeshCache? by mutableStateOf(null); private set
+    /** True while building the draw list for a new view takes noticeably long (shown as a progress bar). */
+    var sceneSlow by mutableStateOf(false); private set
+
+    private var index: LibraryIndex? = null
+    private var sceneBuilder: SceneBuilder? = null
+    private var sceneJob: Job? = null
+    private var sceneAgain = false // the view changed again while a draw list was being built
 
     private val recents = RecentFiles(application)
 
@@ -82,8 +108,15 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     /** Recently opened files, newest first. */
     val recentFiles: List<RecentFile> get() = recents.entries
 
-    /** Maps world coordinates (µm, y up) to screen pixels (y down). */
-    var view: Affine by mutableStateOf(Affine.IDENTITY); private set
+    private var viewState by mutableStateOf(Affine.IDENTITY)
+
+    /** Maps world coordinates (µm, y up) to screen pixels (y down). Changing it may start a new draw list. */
+    var view: Affine
+        get() = viewState
+        private set(value) {
+            viewState = value
+            requestScene()
+        }
     var rulerMode by mutableStateOf(false); private set
     var ruler: Ruler? by mutableStateOf(null); private set
     var rotationLocked by mutableStateOf(false); private set
@@ -151,18 +184,41 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             try {
+                // Let go of the previous file first: big files need all the memory they can get.
+                unloadFile()
                 state = ViewerState.Loading("Reading $name…")
-                val lib = withContext(Dispatchers.IO) { open().use { GdsParser.parse(it) } }
+                val start = SystemClock.elapsedRealtime()
+                val lib = withContext(Dispatchers.IO) {
+                    open().use { input ->
+                        GdsReader.read(input, isCancelled = { !isActive }) { bytes ->
+                            state = ViewerState.Loading("Reading $name… ${bytes shr 20} MB")
+                        }
+                    }
+                }
                 if (lib.cells.isEmpty()) {
                     state = ViewerState.Failed("This file contains no cells.")
                     return@launch
                 }
-                val cell = withContext(Dispatchers.Default) { LayoutFlattener(lib).defaultCell() }
+                val readDone = SystemClock.elapsedRealtime()
+                state = ViewerState.Loading("Indexing $name…")
+                val idx = withContext(Dispatchers.Default) { LibraryIndex(lib) }
+                Log.i(
+                    TAG,
+                    "$name: read in ${readDone - start} ms, indexed in ${SystemClock.elapsedRealtime() - readDone} ms; " +
+                        "${lib.cells.size} cells, ${lib.layers.size} layers",
+                )
+                val cell = idx.defaultTopCell()
                 if (cell == null) {
                     state = ViewerState.Failed("This file contains no cells.")
                     return@launch
                 }
-                buildCell(lib, cell.name, name)
+                val cache = MeshCache(lib)
+                library = lib
+                index = idx
+                meshes = cache
+                sceneBuilder = SceneBuilder(idx, cache)
+                fileName = name
+                buildCell(cell.index)
                 // Remember the file only now that it has loaded successfully.
                 withContext(Dispatchers.IO) {
                     when (source) {
@@ -181,33 +237,47 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** Flattens [cellName] and publishes the result. Must run inside the load job's coroutine. */
-    private suspend fun buildCell(lib: GdsLibrary, cellName: String, name: String) {
-        state = ViewerState.Loading("Building $cellName…")
-        val geo = withContext(Dispatchers.Default) {
-            LayoutFlattener(lib, isCancelled = { !isActive }).flatten(cellName)
-        }
+    /** Forgets the loaded file (before loading another one). */
+    private fun unloadFile() {
+        sceneJob?.cancel()
+        library = null
+        index = null
+        meshes = null
+        sceneBuilder = null
+        frame = null
+        drawList = null
+        ruler = null
+        dragEnd = 0
+    }
+
+    /** Shows [cell] of the loaded file. Must run inside the load job's coroutine. */
+    private suspend fun buildCell(cell: Int) {
+        val lib = library ?: return
+        val idx = index ?: return
+        val name = lib.cells[cell].name
+        state = ViewerState.Loading("Preparing $name…")
+        val counts = withContext(Dispatchers.Default) { LayerStats.shapeCounts(lib, cell) }
         val previous = layers.associate { it.key to it.visible }
-        library = lib
-        fileName = name
-        geometry = geo
-        layers = geo.layers.map { lg ->
-            val index = lib.layers.indexOf(lg.key).coerceAtLeast(0)
-            LayerUi(lg.key, index % LayerPalette.size, previous[lg.key] ?: true, lg.shapeCount)
+        sceneJob?.cancel()
+        drawList = null
+        frame = idx.frame(cell)
+        layers = counts.indices.filter { counts[it] > 0 }.map { i ->
+            val key = lib.layers[i]
+            LayerUi(key, i, i % LayerPalette.size, previous[key] ?: true, counts[i])
         }
         ruler = null
         dragEnd = 0
-        fitToView()
         state = ViewerState.Ready
+        fitToView()
+        requestScene()
     }
 
     fun selectCell(name: String) {
-        val lib = library ?: return
-        val file = fileName ?: return
+        val cell = library?.cell(name) ?: return
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             try {
-                buildCell(lib, name, file)
+                buildCell(cell.index)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: OutOfMemoryError) {
@@ -251,7 +321,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun fitToView() {
-        val geo = geometry
+        val geo = frame
         if (geo == null || viewportW == 0) {
             pendingFit = true
             return
@@ -276,7 +346,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
      * view follows the fingers and snaps back onto a snap angle when it comes within [SNAP_DEG].
      */
     fun onTransform(cx: Double, cy: Double, panX: Double, panY: Double, zoom: Double, rotationDeg: Double) {
-        if (geometry == null) return
+        if (frame == null) return
         var rot = 0.0
         if (!rotationLocked) {
             if (rotationHeld) {
@@ -339,7 +409,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Limits a zoom factor so the resulting scale stays within the allowed range. */
     private fun clampZoom(zoom: Double): Double {
-        val geo = geometry ?: return zoom
+        val geo = frame ?: return zoom
         val current = view.scale
         // Zoom limits: between 5% of the "fit" scale and 500 px per database unit.
         val fitScale = 0.9 * min(
@@ -376,6 +446,102 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun toggleRotationLock() {
         rotationLocked = !rotationLocked
+    }
+
+    // ------------------------------------------------------------------ scene
+
+    /**
+     * Starts building a new draw list if the current one does not fit the view any more. Builds
+     * run one at a time in the background; while one runs, the old draw list stays on screen
+     * (it is drawn with the current view, so panning and zooming stay smooth).
+     */
+    private fun requestScene() {
+        if (state != ViewerState.Ready || viewportW == 0 || !sceneOutdated()) return
+        if (sceneJob?.isActive == true) {
+            sceneAgain = true
+            return
+        }
+        sceneJob = viewModelScope.launch {
+            // Quick builds (the usual case) show no progress bar; it would only flicker.
+            val slowTimer = launch {
+                delay(SCENE_SLOW_MS)
+                sceneSlow = true
+            }
+            try {
+                do {
+                    sceneAgain = false
+                    val builder = sceneBuilder ?: break
+                    val f = frame ?: break
+                    val request = SceneRequest(f, view, viewportW, viewportH)
+                    val list = withContext(Dispatchers.Default) { builder.build(request) { !isActive } }
+                    val stats = list.stats
+                    Log.i(
+                        TAG,
+                        "scene: ${list.groups.size} chunks, ${stats.instances} instances, ${stats.tinyItems} tiny; " +
+                            "traversal ${stats.traversalMillis} ms, meshes ${stats.meshMillis} ms",
+                    )
+                    if (frame === f) drawList = list
+                } while (sceneAgain && sceneOutdated())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: OutOfMemoryError) {
+                state = ViewerState.Failed("Not enough memory to show this layout.")
+            } finally {
+                slowTimer.cancel()
+                sceneSlow = false
+            }
+        }
+    }
+
+    /** True if the draw list is missing or was built for a clearly different view. */
+    private fun sceneOutdated(): Boolean {
+        val list = drawList ?: return true
+        val built = list.request
+        if (built.frame !== frame || built.viewportWidth != viewportW || built.viewportHeight != viewportH) return true
+        // Zoomed in or out a lot: the level of detail no longer fits.
+        val ratio = view.scale / built.view.scale
+        if (ratio > SCENE_ZOOM_RATIO || ratio < 1 / SCENE_ZOOM_RATIO) return true
+        // Rotated: the small-shapes raster is aligned with the screen it was built for.
+        var turn = abs(view.rotationDegrees - built.view.rotationDegrees) % 360.0
+        if (turn > 180) turn = 360 - turn
+        if (turn > SCENE_ROTATION_DEG) return true
+        // Moved beyond the margin that was included.
+        return !list.coverage.contains(visibleWorldBox())
+    }
+
+    /** The world area (µm) currently on screen, as an axis-aligned box. */
+    private fun visibleWorldBox(): Box {
+        val inv = view.inverse()
+        var x0 = Double.MAX_VALUE; var y0 = Double.MAX_VALUE
+        var x1 = -Double.MAX_VALUE; var y1 = -Double.MAX_VALUE
+        for (corner in 0 until 4) {
+            val sx = if (corner and 1 == 0) 0.0 else viewportW.toDouble()
+            val sy = if (corner and 2 == 0) 0.0 else viewportH.toDouble()
+            val wx = inv.mapX(sx, sy); val wy = inv.mapY(sx, sy)
+            x0 = min(x0, wx); x1 = max(x1, wx); y0 = min(y0, wy); y1 = max(y1, wy)
+        }
+        return Box(x0, y0, x1, y1)
+    }
+
+    /**
+     * Called (from the GL thread) when the renderer needs meshes that are not built yet. Builds a
+     * batch of them in the background (closest to the screen center first), then calls [done]; the
+     * renderer uploads them and asks again for the rest. Batches keep memory use bounded.
+     */
+    fun buildMissingMeshes(chunks: List<Chunk>, done: () -> Unit) {
+        val cache = meshes
+        if (cache == null) {
+            done()
+            return
+        }
+        viewModelScope.launch(Dispatchers.Default) {
+            try {
+                cache.ensure(chunks, MESH_BATCH_BYTES) { !isActive }
+            } catch (e: OutOfMemoryError) {
+                return@launch // stop streaming; what is on screen stays
+            }
+            done()
+        }
     }
 
     // ------------------------------------------------------------------ ruler
@@ -440,16 +606,18 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         dragNew = false
         dragEnd = 0
         if (r == null || end == 0) return
-        val geo = geometry ?: return
+        val f = frame ?: return
+        val idx = index ?: return
         if (!snapEnabled) return
-        val visible = layers.filter { it.visible }.map { it.key }.toSet()
+        val visible = BooleanArray(idx.library.layers.size)
+        for (layer in layers) if (layer.visible) visible[layer.layer] = true
         val radius = snapRadiusPx / view.scale
         viewModelScope.launch {
             val p1 = if (wasNew || end == 1) {
-                withContext(Dispatchers.Default) { Snapper.snap(geo, visible, r.x1, r.y1, radius) }
+                withContext(Dispatchers.Default) { Snapping.snap(idx, f, visible, r.x1, r.y1, radius) }
             } else null
             val p2 = if (wasNew || end == 2) {
-                withContext(Dispatchers.Default) { Snapper.snap(geo, visible, r.x2, r.y2, radius) }
+                withContext(Dispatchers.Default) { Snapping.snap(idx, f, visible, r.x2, r.y2, radius) }
             } else null
             if (ruler === r) {
                 ruler = Ruler(p1?.get(0) ?: r.x1, p1?.get(1) ?: r.y1, p2?.get(0) ?: r.x2, p2?.get(1) ?: r.y2)
@@ -458,12 +626,22 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private companion object {
+        const val TAG = "GdsViewer"
+
         // Rotation snapping: the snap angles are all multiples of SNAP_STEP_DEG (0, 90, 180, -90).
         const val SNAP_STEP_DEG = 90.0
         const val BREAKOUT_DEG = 20.0 // twist needed to leave a snap angle
         const val ARM_DEG = 10.0 // after breaking out, move this far away before snapping is armed
         const val SNAP_DEG = 4.0 // while twisting: snap when this close to a snap angle
         const val RELEASE_SNAP_DEG = 8.0 // on release: animate onto a snap angle when this close
+
+        // A new draw list is built when the zoom changed by more than this factor or the rotation by this angle.
+        const val SCENE_ZOOM_RATIO = 1.6
+        const val SCENE_ROTATION_DEG = 3.0
+        const val SCENE_SLOW_MS = 400L
+
+        // Meshes are built and uploaded in batches of about this size.
+        const val MESH_BATCH_BYTES = 48L shl 20
 
     }
 }

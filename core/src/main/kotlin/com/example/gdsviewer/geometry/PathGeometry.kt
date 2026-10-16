@@ -1,6 +1,5 @@
 package com.example.gdsviewer.geometry
 
-import com.example.gdsviewer.gds.GdsPath
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -15,14 +14,10 @@ internal object PathGeometry {
 
     /**
      * Appends fill triangles (3 vertices each) to [triangles] and closed outline segments (2
-     * points each) to [lines]. Coordinates stay in database units.
-     */
-    fun build(path: GdsPath, triangles: DoubleList, lines: DoubleList) =
-        build(path.xy, 0, path.xy.size / 2, path.width, path.pathType, path.beginExtension, path.endExtension, triangles, lines)
-
-    /**
-     * Same, for a path given as raw values: [pointCount] center line points starting at point
-     * number [firstPoint] of [xy] (x, y, x, y, ...), with [width] and the GDS path [pathType].
+     * points each) to [lines], for the path with [pointCount] center line points starting at point
+     * number [firstPoint] of [xy] (x, y, x, y, ...), with [width] and the GDS path [pathType]
+     * (0 flush, 1 round, 2 half-width extension, 4 custom extensions). Coordinates stay in
+     * database units.
      */
     fun build(
         xy: IntArray, firstPoint: Int, pointCount: Int, width: Int, pathType: Int,

@@ -66,7 +66,7 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
                 title = {
                     Column {
                         Text(vm.fileName ?: "GDS Viewer", maxLines = 1)
-                        val cell = vm.geometry?.cellName
+                        val cell = vm.frame?.name
                         if (ready && cell != null) {
                             Text(cell, style = MaterialTheme.typography.bodySmall, maxLines = 1)
                         }
@@ -139,7 +139,11 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
             Modifier.fillMaxSize().background(canvas).padding(padding),
             contentAlignment = Alignment.Center,
         ) {
-            when (val s = vm.state) {
+            // The drawing stays during loading (with the progress on top), so its OpenGL context and
+            // GPU memory are reused instead of being created anew for every file.
+            val state = vm.state
+            if (state is ViewerState.Ready || state is ViewerState.Loading) LayoutViewer(vm)
+            when (val s = state) {
                 ViewerState.Empty -> StartColumn(vm, verticalSpacing = 12.dp) {
                     Icon(
                         painterResource(R.drawable.ic_folder_open), contentDescription = null,
@@ -160,7 +164,7 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
                     Text(s.message, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
                     Button(onClick = openFile) { Text("Open file") }
                 }
-                ViewerState.Ready -> LayoutViewer(vm)
+                ViewerState.Ready -> Unit
             }
         }
     }

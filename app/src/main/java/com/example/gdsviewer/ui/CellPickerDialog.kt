@@ -29,11 +29,11 @@ import com.example.gdsviewer.R
 @Composable
 fun CellPickerDialog(vm: ViewerViewModel, onDismiss: () -> Unit) {
     val library = vm.library ?: return
-    val current = vm.geometry?.cellName
+    val current = vm.frame?.name
     var query by remember { mutableStateOf("") }
     val topNames = remember(library) { library.topCells.map { it.name }.toSet() }
     val names = remember(library, query) {
-        library.cells.keys
+        library.cells.map { it.name }
             .filter { it.contains(query, ignoreCase = true) }
             .sortedWith(compareBy({ it !in topNames }, { it.lowercase() }))
     }

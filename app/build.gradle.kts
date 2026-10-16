@@ -17,8 +17,13 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Optimized, non-debuggable build: big layouts are several times faster than in a debug build.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Signed with this machine's debug key, like the debug builds, so installed copies can be
+            // updated in place. Use a real release key before publishing on Google Play.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

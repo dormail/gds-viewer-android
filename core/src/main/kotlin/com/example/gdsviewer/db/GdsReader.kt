@@ -1,7 +1,6 @@
 package com.example.gdsviewer.db
 
 import com.example.gdsviewer.gds.GdsFormatException
-import com.example.gdsviewer.gds.GdsParser
 import java.io.EOFException
 import java.io.FilterInputStream
 import java.io.InputStream
@@ -15,6 +14,21 @@ import kotlin.math.max
  * Fast reader for GDSII stream files that fills a [LibraryBuilder] directly (no per-shape objects).
  */
 object GdsReader {
+    /**
+     * Decodes a GDSII 8-byte real: 1 sign bit, 7 bits exponent (excess 64, base 16) and a 56-bit
+     * mantissa. value = mantissa / 2^56 * 16^(exponent - 64).
+     */
+    internal fun decodeReal8(bytes: ByteArray, offset: Int): Double {
+        val b0 = bytes[offset].toInt() and 0xFF
+        var mantissa = 0L
+        for (i in 1..7) mantissa = (mantissa shl 8) or (bytes[offset + i].toLong() and 0xFF)
+        if (mantissa == 0L) return 0.0
+        val exponent = (b0 and 0x7F) - 64
+        // 16^e = 2^(4e); dividing by 2^56 is folded into the same power of two.
+        val value = Math.scalb(mantissa.toDouble(), 4 * exponent - 56)
+        return if (b0 and 0x80 != 0) -value else value
+    }
+
     private const val BUFFER_SIZE = 1 shl 20
     private const val PROGRESS_STEP = 1L shl 20
     private const val CANCEL_POLL_MASK = 4095 // poll isCancelled every 4096 records
@@ -298,7 +312,7 @@ object GdsReader {
 
         private fun real8(offset: Int): Double {
             need(offset, 8)
-            return GdsParser.decodeReal8(buf, dataPos + offset)
+            return decodeReal8(buf, dataPos + offset)
         }
 
         /** ISO-8859-1 text with trailing NUL padding removed. */

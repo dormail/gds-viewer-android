@@ -76,10 +76,19 @@ class SceneRenderer : GLSurfaceView.Renderer {
 
     /**
      * Called on the GL thread with chunks of the current draw list whose mesh is neither on the GPU nor
-     * in the cache (the app then builds them in the background and calls requestRender). Called at most
-     * once per distinct draw list.
+     * in the cache, closest to the screen center first. The app builds (some of) them in the background,
+     * then calls [meshesReady] and requestRender. Only one request is outstanding at a time; chunks
+     * that are still missing are reported again after [meshesReady], so big views stream in batches.
      */
     @Volatile var onMissingMeshes: ((List<Chunk>) -> Unit)? = null
+
+    /** Set while the app is building meshes we asked for; see [onMissingMeshes]. */
+    @Volatile private var missingRequested = false
+
+    /** Tells the renderer that the meshes requested via [onMissingMeshes] are built (or the attempt ended). Any thread. */
+    fun meshesReady() {
+        missingRequested = false
+    }
 
     /** Called on the GL thread when uploads are still pending, so the host should call GLSurfaceView.requestRender(). */
     @Volatile var requestRender: (() -> Unit)? = null
@@ -113,7 +122,6 @@ class SceneRenderer : GLSurfaceView.Renderer {
     private var instanceOffsets = IntArray(0) // byte offset of each group in the instance buffer
     private var unresolved = IntArray(0) // indices of groups whose mesh is not on the GPU yet
     private var unresolvedCount = 0
-    private var reportMissing = false
     private var layerItemsDirty = false
     private var logPending = false
     private var uploadsPending = 0
@@ -172,6 +180,9 @@ class SceneRenderer : GLSurfaceView.Renderer {
             deleteAllMeshes()
             ownerCache = cache
             preparedList = null
+            // This renderer has uploaded nothing from the cache yet (it may come from an earlier
+            // renderer, e.g. before a screen rotation): make the cache forget what was uploaded.
+            cache?.markAllEvicted()
         }
         if (list !== preparedList) prepare(list)
         if (list != null && cache != null) {
@@ -359,7 +370,7 @@ class SceneRenderer : GLSurfaceView.Renderer {
         uploadsPending = 0
         layerItemsDirty = true
         logPending = list != null
-        reportMissing = list != null
+        missingRequested = false
         if (list == null) return
 
         uploadInstances(list)
@@ -467,6 +478,7 @@ class SceneRenderer : GLSurfaceView.Renderer {
         var uploadedBytes = 0L
         var kept = 0
         uploadsPending = 0
+        val report = !missingRequested
         var missing: ArrayList<Chunk>? = null
         for (n in 0 until unresolvedCount) {
             val index = unresolved[n]
@@ -475,7 +487,7 @@ class SceneRenderer : GLSurfaceView.Renderer {
             val mesh = cache.peek(chunk)
             if (mesh == null) {
                 unresolved[kept++] = index
-                if (reportMissing) (missing ?: ArrayList<Chunk>().also { missing = it }).add(chunk)
+                if (report) (missing ?: ArrayList<Chunk>().also { missing = it }).add(chunk)
             } else if (uploadedBytes >= UPLOAD_BYTES_PER_FRAME) {
                 unresolved[kept++] = index
                 uploadsPending++
@@ -486,9 +498,9 @@ class SceneRenderer : GLSurfaceView.Renderer {
             }
         }
         unresolvedCount = kept
-        if (reportMissing) {
-            reportMissing = false
-            missing?.let { onMissingMeshes?.invoke(it) }
+        missing?.let {
+            missingRequested = true
+            onMissingMeshes?.invoke(it)
         }
     }
 
@@ -589,6 +601,28 @@ class SceneRenderer : GLSurfaceView.Renderer {
             resident.remove(mesh.chunk.id)
             cache.markEvicted(mesh.chunk)
         }
+    }
+
+    /**
+     * Deletes all GPU objects. Call on the GL thread (GLSurfaceView.queueEvent) before the view goes
+     * away; drawing again afterwards needs a new surface (onSurfaceCreated).
+     */
+    fun release() {
+        deleteAllMeshes()
+        ownerCache?.markAllEvicted()
+        ownerCache = null
+        preparedList = null
+        deleteRasterTextures()
+        idArray[0] = instanceBuffer
+        idArray[1] = quadBuffer
+        GLES20.glDeleteBuffers(2, idArray, 0)
+        instanceBuffer = 0
+        instanceBufferBytes = 0
+        quadBuffer = 0
+        GLES20.glDeleteProgram(meshProgram)
+        GLES20.glDeleteProgram(rasterProgram)
+        meshProgram = 0
+        rasterProgram = 0
     }
 
     private fun deleteAllMeshes() {

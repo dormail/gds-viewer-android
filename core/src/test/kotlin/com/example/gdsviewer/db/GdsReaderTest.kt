@@ -449,4 +449,16 @@ class GdsReaderTest {
         assertEquals(cells * 200, lib.cells.sumOf { it.paths.size })
         assertTrue(seconds < 30.0, "reading took $seconds s")
     }
+
+    @Test
+    fun decodeReal8RoundTrips() {
+        for (v in doubleArrayOf(1.0, 0.001, 1e-9, -2.5, 0.0)) {
+            val decoded = GdsReader.decodeReal8(com.example.gdsviewer.gds.encodeReal8(v), 0)
+            if (v == 0.0) {
+                org.junit.Assert.assertEquals(0.0, decoded, 0.0)
+            } else {
+                org.junit.Assert.assertTrue("$v -> $decoded", Math.abs(decoded - v) / Math.abs(v) < 1e-15)
+            }
+        }
+    }
 }

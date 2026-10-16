@@ -20,9 +20,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SmallFloatingActionButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -39,7 +39,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.layout.onSizeChanged
@@ -47,13 +46,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.gdsviewer.R
-import com.example.gdsviewer.render.LayerStyle
-import com.example.gdsviewer.render.LayoutRenderer
+import com.example.gdsviewer.render.SceneLayerStyle
+import com.example.gdsviewer.render.SceneRenderer
 import com.example.gdsviewer.ui.theme.LayerPalette
 import com.example.gdsviewer.ui.theme.LocalDarkTheme
 import com.example.gdsviewer.ui.theme.canvasColor
 import com.example.gdsviewer.ui.theme.canvasColorInt
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.exp
@@ -76,14 +77,23 @@ fun LayoutViewer(vm: ViewerViewModel) {
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val dark = LocalDarkTheme.current
-    val renderer = remember { LayoutRenderer() }
+    val renderer = remember { SceneRenderer() }
     val glView = remember {
         GLSurfaceView(context).apply {
-            setEGLContextClientVersion(2)
-            setEGLConfigChooser(LayoutRenderer.ConfigChooser())
+            setEGLContextClientVersion(3)
+            setEGLConfigChooser(SceneRenderer.ConfigChooser())
             preserveEGLContextOnPause = true
             setRenderer(renderer)
             renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
+            // The renderer streams meshes to the GPU over several frames and asks for missing ones.
+            val surface = this
+            renderer.requestRender = { surface.requestRender() }
+            renderer.onMissingMeshes = { chunks ->
+                vm.buildMissingMeshes(chunks) {
+                    renderer.meshesReady()
+                    surface.requestRender()
+                }
+            }
         }
     }
 
@@ -99,6 +109,14 @@ fun LayoutViewer(vm: ViewerViewModel) {
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+            // Free the GPU memory now: the view is going away (e.g. screen rotation). Wait briefly
+            // so this runs on the GL thread before the view is detached.
+            val released = CountDownLatch(1)
+            glView.queueEvent {
+                renderer.release()
+                released.countDown()
+            }
+            released.await(500, TimeUnit.MILLISECONDS)
             glView.onPause()
         }
     }
@@ -142,11 +160,13 @@ fun LayoutViewer(vm: ViewerViewModel) {
             modifier = Modifier.fillMaxSize(),
             update = {
                 // State read here is tracked: when it changes, this block runs again.
-                renderer.geometry = vm.geometry
+                // The mesh cache is set before the draw list (the renderer reads them in the other order).
+                renderer.meshes = vm.meshes
+                renderer.drawList = vm.drawList
                 renderer.background = canvasColorInt(dark)
                 renderer.fillAlpha = LayerPalette.fillAlpha(dark)
                 renderer.styles = vm.layers.map {
-                    LayerStyle(it.key, LayerPalette.color(it.paletteIndex, dark), it.visible)
+                    SceneLayerStyle(it.layer, LayerPalette.color(it.paletteIndex, dark), it.visible)
                 }
                 renderer.view = vm.view
                 glView.requestRender()
@@ -280,9 +300,9 @@ fun LayoutViewer(vm: ViewerViewModel) {
                 },
         )
 
-        RulerAndScaleOverlay(vm)
+        if (vm.frame != null) RulerAndScaleOverlay(vm)
 
-        val geo = vm.geometry
+        val frame = vm.frame
         val rotation = vm.view.rotationDegrees.toFloat()
         if (abs(rotation) > 0.1f) {
             SmallFloatingActionButton(
@@ -295,22 +315,11 @@ fun LayoutViewer(vm: ViewerViewModel) {
                 )
             }
         }
-        if (geo != null && geo.truncated) {
-            Surface(
-                color = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth(),
-            ) {
-                Text(
-                    "Layout too large — only part of it is shown",
-                    modifier = Modifier.padding(8.dp), textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
-        if (geo != null && geo.isEmpty) {
+        // A thin progress bar while building the view takes a moment (big layouts).
+        if (vm.sceneSlow) LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth())
+        if (frame != null && frame.isEmpty) {
             Text(
-                "Cell ${geo.cellName} contains no shapes",
+                "Cell ${frame.name} contains no shapes",
                 color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.align(Alignment.Center),
             )
         }
@@ -323,7 +332,7 @@ private fun androidx.compose.foundation.layout.BoxScope.RulerAndScaleOverlay(vm:
     val density = LocalDensity.current
     val view = vm.view
     val ruler = vm.ruler
-    val dbUnit = vm.geometry?.dbUnitMicrons ?: 0.001
+    val dbUnit = vm.frame?.dbUnitMicrons ?: 0.001
     val dark = LocalDarkTheme.current
     val textColor = MaterialTheme.colorScheme.onSurface
     val subtleColor = MaterialTheme.colorScheme.onSurfaceVariant
