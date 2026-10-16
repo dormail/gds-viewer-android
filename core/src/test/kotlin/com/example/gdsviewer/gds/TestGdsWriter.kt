@@ -47,6 +47,11 @@ class TestGdsWriter {
         rec(0x08, 0); rec(0x0D, 2, i16(layer)); rec(0x0E, 2, i16(datatype)); rec(0x10, 3, i32(*xy)); endel()
     }
 
+    /** A BOX element (record 0x2D); [xy] should list 5 points (first repeated at the end). */
+    fun box(layer: Int, boxtype: Int, vararg xy: Int) = apply {
+        rec(0x2D, 0); rec(0x0D, 2, i16(layer)); rec(0x2E, 2, i16(boxtype)); rec(0x10, 3, i32(*xy)); endel()
+    }
+
     fun path(layer: Int, datatype: Int, width: Int, pathType: Int, bgn: Int, end: Int, vararg xy: Int) = apply {
         rec(0x09, 0); rec(0x0D, 2, i16(layer)); rec(0x0E, 2, i16(datatype)); rec(0x21, 2, i16(pathType))
         rec(0x0F, 3, i32(width)); rec(0x30, 3, i32(bgn)); rec(0x31, 3, i32(end)); rec(0x10, 3, i32(*xy)); endel()
