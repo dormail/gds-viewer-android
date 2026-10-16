@@ -54,7 +54,7 @@ fun LayerSheet(vm: ViewerViewModel, onDismiss: () -> Unit) {
         )
         val numbers = NumberFormat.getIntegerInstance(Locale.getDefault())
         LazyColumn {
-            items(vm.layers, key = { it.key }) { layer ->
+            items(vm.layers, key = { it.key.toString() }) { layer ->
                 val color = Color(layer.color)
                 ListItem(
                     modifier = Modifier.combinedClickable(
