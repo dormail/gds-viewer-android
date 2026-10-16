@@ -24,3 +24,9 @@ internal fun triangleArea(mesh: ChunkMesh, k: Int): Double {
     }
     return sum
 }
+
+/** World (µm) -> screen view that shows world point ([cx], [cy]) in the middle of a [w] x [h] viewport at [scale] px per µm (y flipped). */
+internal fun testView(cx: Double, cy: Double, scale: Double, w: Int, h: Int): com.example.gdsviewer.geometry.Affine =
+    com.example.gdsviewer.geometry.Affine.translate(w / 2.0, h / 2.0) *
+        com.example.gdsviewer.geometry.Affine.scale(scale, -scale) *
+        com.example.gdsviewer.geometry.Affine.translate(-cx, -cy)

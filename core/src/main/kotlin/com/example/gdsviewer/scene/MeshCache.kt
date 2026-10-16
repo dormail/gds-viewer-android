@@ -1,6 +1,7 @@
 package com.example.gdsviewer.scene
 
 import com.example.gdsviewer.db.Library
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Builds [ChunkMesh]es on demand and keeps them until the renderer has uploaded them to the GPU
@@ -31,13 +32,20 @@ class MeshCache(val library: Library, val budgetBytes: Long = 128L shl 20) {
     /** The cached mesh of [chunk], or null. Never builds. */
     fun peek(chunk: Chunk): ChunkMesh? = synchronized(lock) { cache[chunk.id] }
 
-    /** Builds the meshes of all [chunks] that are neither cached nor uploaded. Stops early when [isCancelled] returns true. */
-    fun ensure(chunks: Collection<Chunk>, isCancelled: () -> Boolean = { false }) {
+    /**
+     * Builds the meshes of [chunks] that are neither cached nor uploaded, on several cores. Stops
+     * early when [isCancelled] returns true, or once about [maxBytes] of new meshes were built (so
+     * a huge view can be streamed to the GPU in batches without overflowing the cache). Returns
+     * true if all [chunks] are now cached or uploaded.
+     */
+    fun ensure(chunks: Collection<Chunk>, maxBytes: Long = Long.MAX_VALUE, isCancelled: () -> Boolean = { false }): Boolean {
         val todo = synchronized(lock) { chunks.filter { it.id !in cache && it.id !in uploaded } }
-        if (todo.isEmpty()) return
+        if (todo.isEmpty()) return true
+        val built = AtomicLong()
         todo.parallelStream().forEach { chunk ->
-            if (!isCancelled()) get(chunk)
+            if (!isCancelled() && built.get() < maxBytes) built.addAndGet(get(chunk).byteSize)
         }
+        return synchronized(lock) { chunks.all { it.id in cache || it.id in uploaded } }
     }
 
     /** Called by the renderer after uploading: drops the CPU copy and remembers that the chunk is on the GPU. */
