@@ -13,7 +13,7 @@ GDS Viewer is a read-only GDSII layout viewer for Android phones and tablets. Op
 - A built-in sample layout, so you can try the app right away.
 - Layer list: tap a layer to show or hide it, long-press to show only that layer, and use All / None to switch everything at once.
 - Pinch to zoom, drag to pan, and twist with two fingers to rotate.
-  - Double-tap to zoom in, two-finger tap to zoom out, or double-tap and hold, then slide up/down to zoom.
+  - Double-tap to zoom in, two-finger tap to zoom out, or double-tap and hold, then slide down/up to zoom in/out (the spot under your finger moves with it).
   - Rotation snaps to 0°, 90°, 180° and 270°: push a twist past about 20° to break out, and it snaps back when you get close or release near an angle.
   - Rotation can be locked in the ⋮ menu.
   - The compass button resets the rotation to zero.

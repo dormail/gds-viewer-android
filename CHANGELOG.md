@@ -4,6 +4,12 @@ All notable changes to GDS Viewer. Download APKs from the [Releases page](https:
 
 ## [Unreleased]
 
+## [0.6] - 2026-10-16
+
+### Changed
+
+- One-finger zoom (double-tap and hold, then slide) now keeps the spot you touched under your finger. It moves with your finger while the layout zooms around it, instead of zooming around the point of the first tap.
+
 ## [0.5] - 2026-10-16
 
 ### Added
@@ -65,7 +71,8 @@ First version.
 
 - A crash when opening the layer list.
 
-[Unreleased]: https://github.com/dormail/gds-viewer-android/compare/v0.5...HEAD
+[Unreleased]: https://github.com/dormail/gds-viewer-android/compare/v0.6...HEAD
+[0.6]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.6
 [0.5]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.5
 [0.4]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.4
 [0.3]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.3

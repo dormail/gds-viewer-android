@@ -173,7 +173,6 @@ fun LayoutViewer(vm: ViewerViewModel) {
                         val isSecondTap = lastTapUpTime >= 0 &&
                             downTime - lastTapUpTime <= viewConfiguration.doubleTapTimeoutMillis &&
                             (down.position - lastTapPos).getDistance() <= slop * 4
-                        val anchor = lastTapPos // quick zoom keeps the first tap's point fixed
                         lastTapUpTime = -1L
 
                         val downPositions = mutableMapOf(down.id to down.position)
@@ -220,6 +219,13 @@ fun LayoutViewer(vm: ViewerViewModel) {
                                     val dy = p.position.y - down.position.y
                                     if (isSecondTap && !multi && abs(dy) > slop) {
                                         quickZoom = true
+                                        // Catch up on the slop, so the touched spot is under the finger.
+                                        val move = p.position - down.position
+                                        vm.onTransform(
+                                            p.position.x.toDouble(), p.position.y.toDouble(),
+                                            move.x.toDouble(), move.y.toDouble(),
+                                            exp(move.y / quickZoomPx).toDouble(), 0.0,
+                                        )
                                     } else if ((p.position - down.position).getDistance() > slop) {
                                         panning = true
                                         if (vm.rulerMode && !multi) {
@@ -228,9 +234,15 @@ fun LayoutViewer(vm: ViewerViewModel) {
                                         }
                                     }
                                 } else if (quickZoom) {
-                                    // Sliding down zooms in, up zooms out (like Google Maps).
-                                    val dy = p.position.y - p.previousPosition.y
-                                    vm.zoomAround(anchor.x.toDouble(), anchor.y.toDouble(), exp(dy / quickZoomPx).toDouble())
+                                    // Sliding down zooms in, up zooms out (like Google Maps). The spot
+                                    // under the finger stays under it: zoom around the finger and move
+                                    // along with it.
+                                    val move = p.position - p.previousPosition
+                                    vm.onTransform(
+                                        p.position.x.toDouble(), p.position.y.toDouble(),
+                                        move.x.toDouble(), move.y.toDouble(),
+                                        exp(move.y / quickZoomPx).toDouble(), 0.0,
+                                    )
                                 } else if (measuring) {
                                     vm.rulerMove(p.position.x, p.position.y)
                                 } else {
