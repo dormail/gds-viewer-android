@@ -9,3 +9,9 @@ local.properties
 /captures
 .externalNativeBuild
 .cxx
+
+# Build outputs and signing keys that must never be committed
+*.apk
+*.aab
+*.jks
+*.keystore

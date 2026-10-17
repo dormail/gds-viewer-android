@@ -25,13 +25,15 @@ class CellBounds(val library: Library) {
         val layerCount = library.layers.size
         val acc = DoubleArray(4 * layerCount) // per layer minX, minY, maxX, maxY; min > max = unused
         resetAcc(acc)
+        // The layers a cell touches, so that per-cell work does not grow with the total number of layers.
+        val used = Used(layerCount)
         val m = RefMatrix()
         boxes = arrayOfNulls(n)
         layerBoxes = Array(n) { LayerBoxes.EMPTY }
 
         for (cell in order) {
             val c = cells[cell]
-            addOwnShapes(c, acc)
+            addOwnShapes(c, acc, used)
             val refs = c.refs
             for (i in 0 until refs.size) {
                 val child = refs.cell[i]
@@ -44,6 +46,7 @@ class CellBounds(val library: Library) {
                     val ty = m.cornerY(k)
                     for (j in 0 until cl.size) {
                         m.mapBox(cl.boxes[4 * j], cl.boxes[4 * j + 1], cl.boxes[4 * j + 2], cl.boxes[4 * j + 3], tx, ty)
+                        used.add(cl.layers[j])
                         val s = 4 * cl.layers[j]
                         if (m.minX < acc[s]) acc[s] = m.minX
                         if (m.minY < acc[s + 1]) acc[s + 1] = m.minY
@@ -52,7 +55,7 @@ class CellBounds(val library: Library) {
                     }
                 }
             }
-            extract(cell, acc)
+            extract(cell, acc, used)
         }
     }
 
@@ -95,12 +98,11 @@ class CellBounds(val library: Library) {
         }
     }
 
-    private fun addOwnShapes(c: com.example.gdsviewer.db.Cell, acc: DoubleArray) {
+    private fun addOwnShapes(c: com.example.gdsviewer.db.Cell, acc: DoubleArray, used: Used) {
         val r = c.rects
         for (i in 0 until r.size) {
-            val s = 4 * r.layer[i]
             val k = 4 * i
-            grow(acc, s, r.xy[k].toDouble(), r.xy[k + 1].toDouble(), r.xy[k + 2].toDouble(), r.xy[k + 3].toDouble())
+            grow(acc, used, r.layer[i], r.xy[k].toDouble(), r.xy[k + 1].toDouble(), r.xy[k + 2].toDouble(), r.xy[k + 3].toDouble())
         }
         val p = c.polygons
         for (i in 0 until p.size) {
@@ -110,7 +112,7 @@ class CellBounds(val library: Library) {
                 if (x < x0) x0 = x; if (x > x1) x1 = x
                 if (y < y0) y0 = y; if (y > y1) y1 = y
             }
-            if (x0 <= x1) grow(acc, 4 * p.layer[i], x0.toDouble(), y0.toDouble(), x1.toDouble(), y1.toDouble())
+            if (x0 <= x1) grow(acc, used, p.layer[i], x0.toDouble(), y0.toDouble(), x1.toDouble(), y1.toDouble())
         }
         val w = c.paths
         for (i in 0 until w.size) {
@@ -122,11 +124,13 @@ class CellBounds(val library: Library) {
             }
             if (x0 > x1) continue
             val g = pathGrow(w.width[i], w.type[i], w.beginExtension[i], w.endExtension[i])
-            grow(acc, 4 * w.layer[i], x0 - g, y0 - g, x1 + g, y1 + g)
+            grow(acc, used, w.layer[i], x0 - g, y0 - g, x1 + g, y1 + g)
         }
     }
 
-    private fun grow(acc: DoubleArray, s: Int, x0: Double, y0: Double, x1: Double, y1: Double) {
+    private fun grow(acc: DoubleArray, used: Used, layer: Int, x0: Double, y0: Double, x1: Double, y1: Double) {
+        used.add(layer)
+        val s = 4 * layer
         if (x0 < acc[s]) acc[s] = x0
         if (y0 < acc[s + 1]) acc[s + 1] = y0
         if (x1 > acc[s + 2]) acc[s + 2] = x1
@@ -134,31 +138,64 @@ class CellBounds(val library: Library) {
     }
 
     /** Moves the finished accumulator of [cell] into the result arrays and resets it. */
-    private fun extract(cell: Int, acc: DoubleArray) {
-        var used = 0
-        for (l in 0 until acc.size / 4) if (acc[4 * l] <= acc[4 * l + 2]) used++
-        if (used == 0) return
-        val layers = IntArray(used)
-        val b = DoubleArray(4 * used)
-        var k = 0
-        var x0 = Double.MAX_VALUE; var y0 = Double.MAX_VALUE; var x1 = -Double.MAX_VALUE; var y1 = -Double.MAX_VALUE
-        for (l in 0 until acc.size / 4) {
-            if (acc[4 * l] > acc[4 * l + 2]) continue
-            layers[k] = l
-            System.arraycopy(acc, 4 * l, b, 4 * k, 4)
-            x0 = minOf(x0, acc[4 * l]); y0 = minOf(y0, acc[4 * l + 1])
-            x1 = max(x1, acc[4 * l + 2]); y1 = max(y1, acc[4 * l + 3])
-            k++
+    private fun extract(cell: Int, acc: DoubleArray, used: Used) {
+        val count = used.sortedCount()
+        var n = 0
+        for (i in 0 until count) if (acc[4 * used.list[i]] <= acc[4 * used.list[i] + 2]) n++
+        if (n > 0) {
+            val layers = IntArray(n)
+            val b = DoubleArray(4 * n)
+            var k = 0
+            var x0 = Double.MAX_VALUE; var y0 = Double.MAX_VALUE; var x1 = -Double.MAX_VALUE; var y1 = -Double.MAX_VALUE
+            for (i in 0 until count) {
+                val l = used.list[i]
+                if (acc[4 * l] > acc[4 * l + 2]) continue
+                layers[k] = l
+                System.arraycopy(acc, 4 * l, b, 4 * k, 4)
+                x0 = minOf(x0, acc[4 * l]); y0 = minOf(y0, acc[4 * l + 1])
+                x1 = max(x1, acc[4 * l + 2]); y1 = max(y1, acc[4 * l + 3])
+                k++
+            }
+            layerBoxes[cell] = LayerBoxes(layers, b)
+            boxes[cell] = Box(x0, y0, x1, y1)
         }
-        layerBoxes[cell] = LayerBoxes(layers, b)
-        boxes[cell] = Box(x0, y0, x1, y1)
-        resetAcc(acc)
+        for (i in 0 until count) {
+            val l = used.list[i]
+            acc[4 * l] = Double.MAX_VALUE; acc[4 * l + 1] = Double.MAX_VALUE
+            acc[4 * l + 2] = -Double.MAX_VALUE; acc[4 * l + 3] = -Double.MAX_VALUE
+        }
+        used.clear()
     }
 
     private fun resetAcc(acc: DoubleArray) {
         for (l in 0 until acc.size / 4) {
             acc[4 * l] = Double.MAX_VALUE; acc[4 * l + 1] = Double.MAX_VALUE
             acc[4 * l + 2] = -Double.MAX_VALUE; acc[4 * l + 3] = -Double.MAX_VALUE
+        }
+    }
+
+    /** The set of layers touched while collecting one cell. */
+    private class Used(layerCount: Int) {
+        private val seen = BooleanArray(layerCount)
+        var list = IntArray(16)
+        private var size = 0
+
+        fun add(layer: Int) {
+            if (seen[layer]) return
+            seen[layer] = true
+            if (size == list.size) list = list.copyOf(size * 2)
+            list[size++] = layer
+        }
+
+        /** Sorts the list ascending and returns its length. */
+        fun sortedCount(): Int {
+            java.util.Arrays.sort(list, 0, size)
+            return size
+        }
+
+        fun clear() {
+            for (i in 0 until size) seen[list[i]] = false
+            size = 0
         }
     }
 

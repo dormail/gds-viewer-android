@@ -49,7 +49,10 @@ class SceneBuilder(val index: LibraryIndex, val meshes: MeshCache) {
         meshes.ensure(groups.map { it.chunk }, MESH_BYTES_PER_BUILD, isCancelled)
         val t2 = System.nanoTime()
 
-        val stats = SceneStats(walk.instances, walk.tinyItems, (t1 - t0) / 1_000_000, (t2 - t1) / 1_000_000)
+        val stats = SceneStats(
+            walk.instances, walk.tinyItems, (t1 - t0) / 1_000_000, (t2 - t1) / 1_000_000,
+            walk.visits, walk.budgetExceeded,
+        )
         return DrawList(request, anchorX, anchorY, groups, raster.finish(), visible, stats)
     }
 
@@ -89,7 +92,21 @@ class SceneBuilder(val index: LibraryIndex, val meshes: MeshCache) {
         val groups = HashMap<Int, GroupBuilder>()
         var instances = 0
         var tinyItems = 0L
-        private var visits = 0
+        var visits = 0L
+            private set
+        var budgetExceeded = false
+            private set
+        // Sum of the on-screen areas (world units²) of repeated vector instances of the same chunk.
+        // Every instance costs the GPU its area in pixels, so a hostile file with a million stacked
+        // full-screen copies would stall it. First instances are not counted: chunk boxes of long
+        // wires are mostly empty and overlap a lot, so their box areas say little about the cost.
+        private var coveredArea = 0.0
+        private val maxCoveredArea = MAX_OVERDRAW * view.width * view.height
+        private var work = 0L // visits plus the extra cost of big raster fills and many layers: what the budget limits
+
+        // Cells on the current path from the top cell. A real layout never places a cell inside itself;
+        // a hostile file can, and each such loop would multiply the work.
+        private val onPath = BooleanArray(index.library.cells.size)
         private val lod = request.lodPixels
         private val library = index.library
         private val bounds = index.bounds
@@ -111,28 +128,51 @@ class SceneBuilder(val index: LibraryIndex, val meshes: MeshCache) {
             by1 = ty + maxOf(bb0, bb1) + maxOf(dy0, dy1)
         }
 
+        /**
+         * True once the traversal has done more than [MAX_WORK] steps. Normal files stay far below it;
+         * a hostile file (e.g. arrays of arrays of arrays that all overlap) would otherwise run for years.
+         */
+        private fun overBudget(): Boolean {
+            if (work <= MAX_WORK) return false
+            budgetExceeded = true
+            return true
+        }
+
         private fun hitsView() = bx0 <= view.maxX && view.minX <= bx1 && by0 <= view.maxY && view.minY <= by1
         private fun tooSmall() = max(bx1 - bx0, by1 - by0) * scale < lod
 
         private fun rasterize(layers: LayerBoxes, a: Double, b: Double, c: Double, d: Double, tx: Double, ty: Double) {
+            var rows = 0
             for (k in 0 until layers.size) {
                 val o = 4 * k
-                raster.fillBox(
+                rows += raster.fillBox(
                     layers.layers[k], a, b, c, d, tx, ty,
                     layers.boxes[o], layers.boxes[o + 1], layers.boxes[o + 2], layers.boxes[o + 3],
                 )
             }
             tinyItems++
+            // Tiny items fill a row or two and count nothing extra; big boxes (instances drawn into the
+            // raster because the budget or the instance limit ran out) and cells with very many layers do.
+            work += (rows shr 6) + (layers.size shr 4)
         }
 
         /** Visits one instance of [cell] whose cell coordinates map to world by the given transform. */
         fun visit(cell: Int, a: Double, b: Double, c: Double, d: Double, tx: Double, ty: Double, depth: Int) {
-            if (depth > MAX_DEPTH) return // guards against reference cycles
-            if ((visits++ and 4095) == 0 && isCancelled()) throw CancellationException("Scene build cancelled")
+            if (depth > MAX_DEPTH) return // backstop; cycles are already cut by onPath
+            if (onPath[cell]) return // a reference loop
+            onPath[cell] = true
+            visitCell(cell, a, b, c, d, tx, ty, depth)
+            onPath[cell] = false
+        }
+
+        private fun visitCell(cell: Int, a: Double, b: Double, c: Double, d: Double, tx: Double, ty: Double, depth: Int) {
+            if ((visits++ and 4095L) == 0L && isCancelled()) throw CancellationException("Scene build cancelled")
+            work++
+            if (work > HARD_LIMIT) return // even drawing the rest into the raster would take too long
             val cb = bounds.bounds(cell) ?: return
             mapBox(a, b, c, d, tx, ty, cb.minX, cb.minY, cb.maxX, cb.maxY)
             if (!hitsView()) return
-            if (depth > 0 && tooSmall()) {
+            if (depth > 0 && (tooSmall() || overBudget())) {
                 rasterize(bounds.layerBounds(cell), a, b, c, d, tx, ty)
                 return
             }
@@ -172,6 +212,14 @@ class SceneBuilder(val index: LibraryIndex, val meshes: MeshCache) {
                 return
             }
             val group = groups.getOrPut(chunk.id) { GroupBuilder(chunk) }
+            if (group.count > 0) {
+                coveredArea += (minOf(bx1, view.maxX) - maxOf(bx0, view.minX)) * (minOf(by1, view.maxY) - maxOf(by0, view.minY))
+                if (coveredArea > maxCoveredArea) {
+                    budgetExceeded = true
+                    rasterize(chunk.layerBounds, a, b, c, d, tx, ty)
+                    return
+                }
+            }
             val cx = a * cb.centerX + c * cb.centerY + tx - anchorX
             val cy = b * cb.centerX + d * cb.centerY + ty - anchorY
             // The mesh origin is the chunk origin, so move the transform there.
@@ -203,7 +251,7 @@ class SceneBuilder(val index: LibraryIndex, val meshes: MeshCache) {
             val c0 = range[0]; val c1 = range[1]; val r0 = range[2]; val r1 = range[3]
             val count = (c1 - c0 + 1).toLong() * (r1 - r0 + 1)
 
-            if ((tiny && count > TINY_ENUMERATE_LIMIT) || count > request.maxInstances - instances) {
+            if ((tiny && count > TINY_ENUMERATE_LIMIT) || count > request.maxInstances - instances || overBudget()) {
                 // Too many to look at one by one: draw the box around the whole array, per layer.
                 val layers = bounds.layerBounds(child)
                 for (k in 0 until layers.size) {
@@ -217,7 +265,7 @@ class SceneBuilder(val index: LibraryIndex, val meshes: MeshCache) {
                         ux0 = minOf(ux0, am.minX); uy0 = minOf(uy0, am.minY)
                         ux1 = maxOf(ux1, am.maxX); uy1 = maxOf(uy1, am.maxY)
                     }
-                    raster.fillBox(layers.layers[k], a, b, c, d, tx, ty, ux0, uy0, ux1, uy1)
+                    work += raster.fillBox(layers.layers[k], a, b, c, d, tx, ty, ux0, uy0, ux1, uy1) shr 6
                 }
                 tinyItems++
                 return
@@ -238,6 +286,22 @@ class SceneBuilder(val index: LibraryIndex, val meshes: MeshCache) {
 
     private companion object {
         const val MAX_DEPTH = 64
+
+        /**
+         * Traversal steps per scene (cell instances looked at, plus extra for big raster fills and
+         * cells with very many layers) before the remaining instances are only drawn into the raster.
+         * The 157 MB standard-cell stress file needs 2.9 million at "fit to screen".
+         */
+        const val MAX_WORK = 6_000_000L
+
+        /**
+         * Repeated vector instances of one scene may cover at most this many times the viewed area
+         * (more go into the raster). Real layouts stay at a few times; only stacked copies get near it.
+         */
+        const val MAX_OVERDRAW = 16.0
+
+        /** Beyond this the walk stops altogether, so the rest of a hostile layout is left out. */
+        const val HARD_LIMIT = 2 * MAX_WORK
 
         /** Arrays of tiny elements with more visible elements than this are drawn as one block instead of element by element. */
         const val TINY_ENUMERATE_LIMIT = 20_000

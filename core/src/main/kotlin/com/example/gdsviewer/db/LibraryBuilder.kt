@@ -1,5 +1,6 @@
 package com.example.gdsviewer.db
 
+import com.example.gdsviewer.gds.GdsFormatException
 import com.example.gdsviewer.gds.LayerKey
 import kotlin.math.abs
 import kotlin.math.max
@@ -34,8 +35,15 @@ class LibraryBuilder {
 
     /** Index of the layer with GDS numbers [layer] / [datatype] (0..65535 each). */
     fun layerIndex(layer: Int, datatype: Int): Int = layerIndexByKey.getOrPut((layer shl 16) or (datatype and 0xFFFF)) {
+        // Real designs use a few hundred layer/datatype pairs. Per-layer bookkeeping (colors, bitmaps) must stay small.
+        if (layerKeys.size >= MAX_LAYERS) throw GdsFormatException("The file uses more than $MAX_LAYERS layers")
         layerKeys += LayerKey(layer, datatype)
         layerKeys.size - 1
+    }
+
+    companion object {
+        /** Most distinct layer/datatype pairs a file may use. */
+        const val MAX_LAYERS = 10_000
     }
 
     /** Builds the library. The builder must not be used afterwards. */
@@ -224,23 +232,28 @@ class CellBuilder internal constructor(val index: Int, val name: String) {
 
 // Small growable primitive arrays (no boxing).
 
-internal class IntBuf(capacity: Int = 16) {
-    private var data = IntArray(capacity)
+private val EMPTY_INTS = IntArray(0)
+private val EMPTY_DOUBLES = DoubleArray(0)
+private val EMPTY_BYTES = ByteArray(0)
+
+internal class IntBuf {
+    // Starts empty (shared, zero length) so that cells with nothing of a kind cost nothing; hundreds of thousands of cells are possible.
+    private var data = EMPTY_INTS
     var size = 0
         private set
 
     fun add(v: Int) {
-        if (size == data.size) data = data.copyOf(max(16, size + (size shr 1)))
+        if (size == data.size) data = data.copyOf(max(4, size + (size shr 1)))
         data[size++] = v
     }
 
     operator fun get(i: Int): Int = data[i]
     fun last(): Int = data[size - 1]
-    fun toArray(): IntArray = data.copyOf(size)
+    fun toArray(): IntArray = if (size == 0) EMPTY_INTS else data.copyOf(size)
 }
 
-internal class DoubleBuf(capacity: Int = 4) {
-    private var data = DoubleArray(capacity)
+internal class DoubleBuf {
+    private var data = EMPTY_DOUBLES
     var size = 0
         private set
 
@@ -249,19 +262,19 @@ internal class DoubleBuf(capacity: Int = 4) {
         data[size++] = v
     }
 
-    fun toArray(): DoubleArray = data.copyOf(size)
+    fun toArray(): DoubleArray = if (size == 0) EMPTY_DOUBLES else data.copyOf(size)
 }
 
-internal class ByteBuf(capacity: Int = 16) {
-    private var data = ByteArray(capacity)
+internal class ByteBuf {
+    private var data = EMPTY_BYTES
     var size = 0
         private set
 
     fun add(v: Byte) {
-        if (size == data.size) data = data.copyOf(max(16, size + (size shr 1)))
+        if (size == data.size) data = data.copyOf(max(4, size + (size shr 1)))
         data[size++] = v
     }
 
     operator fun get(i: Int): Byte = data[i]
-    fun toArray(): ByteArray = data.copyOf(size)
+    fun toArray(): ByteArray = if (size == 0) EMPTY_BYTES else data.copyOf(size)
 }

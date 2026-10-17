@@ -5,8 +5,19 @@ package com.example.gdsviewer.geometry
  * cheap triangle fan; other polygons use "ear clipping".
  */
 internal object Triangulator {
-    /** Above this many points ear clipping gets too slow (it is O(n^2)), so we only draw the outline. */
-    const val MAX_POINTS = 20000
+    /**
+     * Above this many points we only draw the outline. A GDS XY record holds at most 8191 points,
+     * so files cannot exceed this; it guards other callers.
+     */
+    const val MAX_POINTS = 8192
+
+    /**
+     * Most steps ([isEar] looks at one remaining vertex per step) that ear clipping may take for
+     * one polygon, about 30 ms. Ear clipping is O(n^2) and much worse for self-intersecting
+     * polygons (random 8190-point polygons take seconds), so it gives up and the polygon is drawn
+     * as outline only. Ordinary concave polygons of a few thousand points need far less.
+     */
+    const val MAX_EAR_CLIP_STEPS = 12_000_000L
 
     /**
      * [pts] = x0, y0, x1, y1, ... ([n] points, first point not repeated at the end).
@@ -21,7 +32,8 @@ internal object Triangulator {
     /**
      * Like [triangulate], but appends 3 indices per triangle to [out] instead of coordinates. An
      * index is the point's number in [pts] plus [base] (the vertex number of point 0 in the mesh).
-     * Appends nothing for polygons with zero area or more than [MAX_POINTS] points.
+     * Appends nothing for polygons with zero area, more than [MAX_POINTS] points, or
+     * that need more than [MAX_EAR_CLIP_STEPS] steps (self-intersecting, hostile).
      */
     fun triangulateIndices(pts: DoubleArray, n: Int, out: IntList, base: Int) {
         if (n < 3 || n > MAX_POINTS) return
@@ -44,7 +56,8 @@ internal object Triangulator {
             }
             return
         }
-        earClip(pts, n, area2 > 0, out, base)
+        val before = out.size
+        if (!earClip(pts, n, area2 > 0, out, base)) out.truncate(before)
     }
 
     /** True if every turn goes the same way as the polygon's orientation (or is straight). */
@@ -59,7 +72,8 @@ internal object Triangulator {
         return true
     }
 
-    private fun earClip(pts: DoubleArray, n: Int, ccw: Boolean, out: IntList, base: Int) {
+    /** Returns false if it gave up because of [MAX_EAR_CLIP_STEPS]; then [out] holds a partial result the caller must drop. */
+    private fun earClip(pts: DoubleArray, n: Int, ccw: Boolean, out: IntList, base: Int): Boolean {
         // Work on a counter-clockwise copy so "convex vertex" always means cross > 0.
         val x = DoubleArray(n)
         val y = DoubleArray(n)
@@ -74,8 +88,10 @@ internal object Triangulator {
         var remaining = n
         var cur = 0
         var stall = 0
+        val steps = LongArray(1)
 
         while (remaining > 3) {
+            if (++steps[0] > MAX_EAR_CLIP_STEPS) return false
             val p = prev[cur]
             val q = next[cur]
             val cross = (x[cur] - x[p]) * (y[q] - y[cur]) - (y[cur] - y[p]) * (x[q] - x[cur])
@@ -83,7 +99,7 @@ internal object Triangulator {
             var emit = false
             if (cross == 0.0) {
                 remove = true // collinear point or zero-width spike: nothing to draw
-            } else if (cross > 0 && isEar(x, y, next, p, cur, q)) {
+            } else if (cross > 0 && isEar(x, y, next, p, cur, q, steps)) {
                 remove = true
                 emit = true
             } else if (++stall > remaining) {
@@ -108,6 +124,7 @@ internal object Triangulator {
             val cross = (x[cur] - x[p]) * (y[q] - y[cur]) - (y[cur] - y[p]) * (x[q] - x[cur])
             if (cross > 0) emitTriangle(ccw, n, base, p, cur, q, out)
         }
+        return true
     }
 
     /** Emits a triangle given by positions in the counter-clockwise working copy as indices of the original points. */
@@ -120,13 +137,15 @@ internal object Triangulator {
      * coordinates as a triangle corner are skipped: "keyhole" polygons (holes connected to the
      * outline by a cut line) visit the same point twice.
      */
-    private fun isEar(x: DoubleArray, y: DoubleArray, next: IntArray, p: Int, cur: Int, q: Int): Boolean {
+    private fun isEar(x: DoubleArray, y: DoubleArray, next: IntArray, p: Int, cur: Int, q: Int, steps: LongArray): Boolean {
         val minX = minOf(x[p], x[cur], x[q])
         val maxX = maxOf(x[p], x[cur], x[q])
         val minY = minOf(y[p], y[cur], y[q])
         val maxY = maxOf(y[p], y[cur], y[q])
         var v = next[q]
+        var scanned = 0L
         while (v != p) {
+            scanned++
             val vx = x[v]
             val vy = y[v]
             v = next[v]
@@ -136,8 +155,9 @@ internal object Triangulator {
             if (side(x[p], y[p], x[cur], y[cur], vx, vy) >= 0 &&
                 side(x[cur], y[cur], x[q], y[q], vx, vy) >= 0 &&
                 side(x[q], y[q], x[p], y[p], vx, vy) >= 0
-            ) return false
+            ) { steps[0] += scanned; return false }
         }
+        steps[0] += scanned
         return true
     }
 
@@ -174,6 +194,11 @@ internal class IntList(capacity: Int = 64) {
 
     fun clear() {
         size = 0
+    }
+
+    /** Drops everything after the first [newSize] entries. */
+    fun truncate(newSize: Int) {
+        size = newSize
     }
 
     fun toArray(): IntArray = data.copyOf(size)

@@ -92,50 +92,62 @@ internal object ChunkPartition {
 
     private fun split(shapes: Shapes, items: IntArray, depth: Int, out: MutableList<IntArray>) {
         val fits = items.size <= MAX_TILE_SHAPES && shapes.vertices(items) <= MAX_VERTICES
-        if (items.size <= 1 || fits || depth >= MAX_DEPTH) {
+        if (items.size <= 1 || fits) {
             out += items
             return
         }
-        val parts = SpatialGrid.quad(shapes.cx, shapes.cy, items)
+        val parts = if (depth >= MAX_DEPTH) null else SpatialGrid.quad(shapes.cx, shapes.cy, items)
         if (parts == null) {
-            out += items
+            // Shapes that cannot be told apart by position (e.g. millions on the same spot): cut by count,
+            // so that no chunk (and mesh) grows without limit.
+            cutByCount(shapes, items, out)
             return
         }
         for (part in parts) split(shapes, part, depth + 1, out)
     }
 
+    /** Cuts [items] (ascending) into consecutive pieces of at most MAX_TILE_SHAPES shapes and about MAX_VERTICES vertices. */
+    private fun cutByCount(shapes: Shapes, items: IntArray, out: MutableList<IntArray>) {
+        var start = 0
+        var vertices = 0L
+        for (k in items.indices) {
+            val v = shapes.vertices(items[k])
+            if (k > start && (k - start >= MAX_TILE_SHAPES || vertices + v > MAX_VERTICES)) {
+                out += items.copyOfRange(start, k)
+                start = k
+                vertices = 0
+            }
+            vertices += v
+        }
+        out += items.copyOfRange(start, items.size)
+    }
+
     private fun makeChunk(library: Library, s: Shapes, id: Int, cell: Int, items: IntArray, single: Boolean): Chunk {
-        val layerCount = library.layers.size
-        val acc = DoubleArray(4 * layerCount)
-        for (l in 0 until layerCount) {
-            acc[4 * l] = Double.MAX_VALUE; acc[4 * l + 1] = Double.MAX_VALUE
-            acc[4 * l + 2] = -Double.MAX_VALUE; acc[4 * l + 3] = -Double.MAX_VALUE
+        // Per-layer boxes, only for the layers the items use (not for all layers of the library).
+        val itemLayers = IntArray(items.size) { s.layer(items[it]) }
+        val sortedLayers = itemLayers.sortedArray()
+        var distinct = 0
+        for (k in sortedLayers.indices) if (k == 0 || sortedLayers[k] != sortedLayers[k - 1]) sortedLayers[distinct++] = sortedLayers[k]
+        val layerIds = sortedLayers.copyOf(distinct)
+        val boxes = DoubleArray(4 * layerIds.size)
+        for (k in layerIds.indices) {
+            boxes[4 * k] = Double.MAX_VALUE; boxes[4 * k + 1] = Double.MAX_VALUE
+            boxes[4 * k + 2] = -Double.MAX_VALUE; boxes[4 * k + 3] = -Double.MAX_VALUE
         }
         var x0 = Double.MAX_VALUE; var y0 = Double.MAX_VALUE; var x1 = -Double.MAX_VALUE; var y1 = -Double.MAX_VALUE
         var rc = 0; var pc = 0
-        for (it in items) {
+        for ((j, it) in items.withIndex()) {
             val b = 4 * it
-            val l = 4 * s.layer(it)
-            if (s.box[b] < acc[l]) acc[l] = s.box[b]
-            if (s.box[b + 1] < acc[l + 1]) acc[l + 1] = s.box[b + 1]
-            if (s.box[b + 2] > acc[l + 2]) acc[l + 2] = s.box[b + 2]
-            if (s.box[b + 3] > acc[l + 3]) acc[l + 3] = s.box[b + 3]
+            val l = 4 * java.util.Arrays.binarySearch(layerIds, itemLayers[j])
+            if (s.box[b] < boxes[l]) boxes[l] = s.box[b]
+            if (s.box[b + 1] < boxes[l + 1]) boxes[l + 1] = s.box[b + 1]
+            if (s.box[b + 2] > boxes[l + 2]) boxes[l + 2] = s.box[b + 2]
+            if (s.box[b + 3] > boxes[l + 3]) boxes[l + 3] = s.box[b + 3]
             if (s.box[b] < x0) x0 = s.box[b]
             if (s.box[b + 1] < y0) y0 = s.box[b + 1]
             if (s.box[b + 2] > x1) x1 = s.box[b + 2]
             if (s.box[b + 3] > y1) y1 = s.box[b + 3]
             if (it < s.r) rc++ else if (it < s.r + s.p) pc++
-        }
-        var used = 0
-        for (l in 0 until layerCount) if (acc[4 * l] <= acc[4 * l + 2]) used++
-        val layers = IntArray(used)
-        val boxes = DoubleArray(4 * used)
-        var k = 0
-        for (l in 0 until layerCount) {
-            if (acc[4 * l] > acc[4 * l + 2]) continue
-            layers[k] = l
-            System.arraycopy(acc, 4 * l, boxes, 4 * k, 4)
-            k++
         }
 
         // Median of max(width, height), from at most ~255 evenly spaced members.
@@ -159,7 +171,7 @@ internal object ChunkPartition {
         return Chunk(
             id, cell,
             ((x0 + x1) / 2).roundToInt(), ((y0 + y1) / 2).roundToInt(),
-            Box(x0, y0, x1, y1), LayerBoxes(layers, boxes), items.size, typical,
+            Box(x0, y0, x1, y1), LayerBoxes(layerIds, boxes), items.size, typical,
             rects, polygons, paths,
         )
     }

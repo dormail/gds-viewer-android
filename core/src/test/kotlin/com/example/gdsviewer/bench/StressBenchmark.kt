@@ -42,7 +42,7 @@ class StressBenchmark {
                 val list = builder.build(SceneRequest(frame, view, w, h))
                 val ms = (System.nanoTime() - a) / 1_000_000
                 "${ms} ms (${list.groups.size} chunks, ${list.stats.instances} inst, ${list.stats.tinyItems} tiny, " +
-                    "trav ${list.stats.traversalMillis} ms, mesh ${list.stats.meshMillis} ms)"
+                    "trav ${list.stats.traversalMillis} ms, mesh ${list.stats.meshMillis} ms, ${list.stats.visits} visits, budget hit ${list.stats.budgetExceeded})"
             }
             println(
                 "BENCH ${file.name}: read ${(t1 - t0) / 1_000_000} ms, index ${(t2 - t1) / 1_000_000} ms, " +

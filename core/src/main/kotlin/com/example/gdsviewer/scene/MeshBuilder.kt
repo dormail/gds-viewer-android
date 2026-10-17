@@ -10,14 +10,14 @@ import com.example.gdsviewer.geometry.Triangulator
 object MeshBuilder {
     fun build(library: Library, chunk: Chunk): ChunkMesh {
         val cell = library.cells[chunk.cell]
-        val layerCount = library.layers.size
 
-        // Sort the members by layer (stable counting sort), once per kind of shape.
-        val rects = byLayer(cell.rects.layer, chunk.rects, layerCount)
-        val polygons = byLayer(cell.polygons.layer, chunk.polygons, layerCount)
-        val paths = byLayer(cell.paths.layer, chunk.paths, layerCount)
+        // Sort the members by layer (stable), once per kind of shape. Only the layers that are used
+        // take part, so the work does not depend on how many layers the library has.
+        val rects = byLayer(cell.rects.layer, chunk.rects)
+        val polygons = byLayer(cell.polygons.layer, chunk.polygons)
+        val paths = byLayer(cell.paths.layer, chunk.paths)
 
-        val rectCount = rects.order.size
+        val rectCount = rects.size
         val vertices = FloatBuf(8 * rectCount + 2 * cell.polygons.xy.size.coerceAtMost(1 shl 20) + 64)
         val triangles = IntList(6 * rectCount + 64)
         val lines = IntList(8 * rectCount + 64)
@@ -35,11 +35,11 @@ object MeshBuilder {
         val ps = cell.polygons
         val ws = cell.paths
 
-        for (layer in 0 until layerCount) {
-            val r0 = rects.offsets[layer]; val r1 = rects.offsets[layer + 1]
-            val p0 = polygons.offsets[layer]; val p1 = polygons.offsets[layer + 1]
-            val w0 = paths.offsets[layer]; val w1 = paths.offsets[layer + 1]
-            if (r0 == r1 && p0 == p1 && w0 == w1) continue
+        var r0 = 0; var p0 = 0; var w0 = 0 // start of the next layer's members in each sorted list
+        while (r0 < rects.size || p0 < polygons.size || w0 < paths.size) {
+            // The next layer is the smallest one still waiting in any of the three lists.
+            val layer = minOf(rects.layerAt(r0), polygons.layerAt(p0), paths.layerAt(w0))
+            val r1 = rects.end(r0, layer); val p1 = polygons.end(p0, layer); val w1 = paths.end(w0, layer)
             layerList += layer
             triangleStart += triangles.size
             lineStart += lines.size
@@ -89,6 +89,7 @@ object MeshBuilder {
                 for (j in 0 until lineSoup.size / 2) vertices.add2((lineSoup.data[2 * j] - ox).toFloat(), (lineSoup.data[2 * j + 1] - oy).toFloat())
                 for (j in 0 until lineSoup.size / 4) lines.add(v + 2 * j, v + 2 * j + 1)
             }
+            r0 = r1; p0 = p1; w0 = w1
         }
         triangleStart += triangles.size
         lineStart += lines.size
@@ -98,21 +99,34 @@ object MeshBuilder {
         )
     }
 
-    /** Member indices of one kind of shape sorted by layer; layer l occupies order[offsets[l] until offsets[l + 1]]. */
-    private class ByLayer(val order: IntArray, val offsets: IntArray)
+    /** Member indices of one kind of shape sorted by layer (ties in member order), with their layers alongside. */
+    private class ByLayer(val order: IntArray, val layers: IntArray) {
+        val size: Int get() = order.size
 
-    private fun byLayer(layerOf: IntArray, members: IntArray?, layerCount: Int): ByLayer {
-        val n = members?.size ?: layerOf.size
-        val offsets = IntArray(layerCount + 1)
-        for (k in 0 until n) offsets[layerOf[if (members == null) k else members[k]] + 1]++
-        for (l in 0 until layerCount) offsets[l + 1] += offsets[l]
-        val fill = offsets.copyOf()
-        val order = IntArray(n)
-        for (k in 0 until n) {
-            val i = if (members == null) k else members[k]
-            order[fill[layerOf[i]]++] = i
+        /** Layer of the member at sorted position [k], or Int.MAX_VALUE past the end. */
+        fun layerAt(k: Int): Int = if (k < layers.size) layers[k] else Int.MAX_VALUE
+
+        /** End (exclusive) of the run of members of [layer] starting at [from]; [from] if that member has another layer. */
+        fun end(from: Int, layer: Int): Int {
+            var k = from
+            while (k < layers.size && layers[k] == layer) k++
+            return k
         }
-        return ByLayer(order, offsets)
+    }
+
+    private fun byLayer(layerOf: IntArray, members: IntArray?): ByLayer {
+        val n = members?.size ?: layerOf.size
+        // Key = layer in the high bits, member position in the low bits: sorting keeps the original order within a layer.
+        val keys = LongArray(n) { k -> (layerOf[if (members == null) k else members[k]].toLong() shl 32) or k.toLong() }
+        keys.sort()
+        val order = IntArray(n)
+        val layers = IntArray(n)
+        for (k in 0 until n) {
+            val pos = (keys[k] and 0xFFFFFFFFL).toInt()
+            order[k] = if (members == null) pos else members[pos]
+            layers[k] = (keys[k] ushr 32).toInt()
+        }
+        return ByLayer(order, layers)
     }
 
     private class FloatBuf(capacity: Int) {

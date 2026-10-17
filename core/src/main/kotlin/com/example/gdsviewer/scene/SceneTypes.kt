@@ -210,6 +210,13 @@ class SceneStats(
     /** Wall time of the traversal and of building missing meshes, in ms. */
     val traversalMillis: Long,
     val meshMillis: Long,
+    /** Number of cell instances the traversal looked at. */
+    val visits: Long = 0,
+    /**
+     * True if the traversal hit its work limit (only hostile or absurd files do): the remaining
+     * cell instances were drawn into the raster instead of being looked at, so details are missing.
+     */
+    val budgetExceeded: Boolean = false,
 )
 
 /** The result of [SceneBuilder.build]: what to draw for one view. Immutable. */

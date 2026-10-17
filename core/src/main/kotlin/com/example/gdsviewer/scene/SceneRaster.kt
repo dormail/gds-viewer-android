@@ -6,11 +6,16 @@ import kotlin.math.floor
 
 /**
  * The per-layer bitmaps of a [TinyRaster] while they are being filled. One bit per raster pixel;
- * a layer's bitmap is only allocated when something is first drawn into it.
+ * a layer's bitmap is only allocated when something is first drawn into it. At most
+ * [MAX_BITMAPS] bitmaps are made: later layers all draw into one shared bitmap (shown in the
+ * color of the first layer that did not get its own), so memory stays bounded for files with
+ * thousands of layers.
  */
 internal class SceneRaster(val width: Int, val height: Int, val worldToRaster: Affine, layerCount: Int) {
     private val bits = arrayOfNulls<LongArray>(layerCount)
     private val words = (width.toLong() * height + 63) / 64
+    private var bitmapCount = 0
+    private var sharedLayer = -1 // the layer index that owns the shared bitmap, or -1
 
     // Box corners in raster pixels, result of the last mapBox call.
     private var x0 = 0.0; private var y0 = 0.0; private var x1 = 0.0; private var y1 = 0.0
@@ -23,7 +28,7 @@ internal class SceneRaster(val width: Int, val height: Int, val worldToRaster: A
     fun fillBox(
         layer: Int, ta: Double, tb: Double, tc: Double, td: Double, ttx: Double, tty: Double,
         bx0: Double, by0: Double, bx1: Double, by1: Double,
-    ) {
+    ): Int {
         // Compose world -> raster with the given transform, without allocating.
         val r = worldToRaster
         val a = r.a * ta + r.c * tb; val b = r.b * ta + r.d * tb
@@ -35,11 +40,12 @@ internal class SceneRaster(val width: Int, val height: Int, val worldToRaster: A
         val bx0v = b * bx0; val bx1v = b * bx1; val dy0 = d * by0; val dy1 = d * by1
         y0 = ty + minOf(bx0v, bx1v) + minOf(dy0, dy1)
         y1 = ty + maxOf(bx0v, bx1v) + maxOf(dy0, dy1)
-        fill(layer)
+        return fill(layer)
     }
 
-    private fun fill(layer: Int) {
-        if (x1 < 0 || y1 < 0 || x0 > width || y0 > height) return
+    /** Fills the box in x0..y1 and returns the number of raster rows it touched (a measure of the work done). */
+    private fun fill(layer: Int): Int {
+        if (x1 < 0 || y1 < 0 || x0 > width || y0 > height) return 0
         var px0 = floor(x0); var px1 = ceil(x1) - 1
         var py0 = floor(y0); var py1 = ceil(y1) - 1
         if (x1 - x0 < 1.0) { px0 = floor((x0 + x1) / 2); px1 = px0 }
@@ -48,10 +54,24 @@ internal class SceneRaster(val width: Int, val height: Int, val worldToRaster: A
         if (py0 < 0) py0 = 0.0
         if (px1 > width - 1) px1 = width - 1.0
         if (py1 > height - 1) py1 = height - 1.0
-        if (px0 > px1 || py0 > py1) return
-        val arr = bits[layer] ?: LongArray(words.toInt()).also { bits[layer] = it }
+        if (px0 > px1 || py0 > py1) return 0
+        val arr = bitmapFor(layer)
         val ix0 = px0.toInt(); val ix1 = px1.toInt()
         for (y in py0.toInt()..py1.toInt()) setRange(arr, y * width + ix0, y * width + ix1)
+        return py1.toInt() - py0.toInt() + 1
+    }
+
+    private fun bitmapFor(layer: Int): LongArray {
+        bits[layer]?.let { return it }
+        if (bitmapCount < MAX_BITMAPS) {
+            bitmapCount++
+            return LongArray(words.toInt()).also { bits[layer] = it }
+        }
+        if (sharedLayer < 0) {
+            sharedLayer = layer
+            return LongArray(words.toInt()).also { bits[layer] = it }
+        }
+        return bits[sharedLayer]!!
     }
 
     /** Sets bits [from]..[to] (inclusive) using whole-word masks. */
@@ -73,5 +93,10 @@ internal class SceneRaster(val width: Int, val height: Int, val worldToRaster: A
         val used = bits.indices.filter { bits[it] != null }
         if (used.isEmpty()) return null
         return TinyRaster(width, height, worldToRaster, used.toIntArray(), Array(used.size) { bits[used[it]]!! })
+    }
+
+    private companion object {
+        /** Own bitmaps (about 180 KB each for a phone screen). Real designs have far fewer layers in view. */
+        const val MAX_BITMAPS = 128
     }
 }

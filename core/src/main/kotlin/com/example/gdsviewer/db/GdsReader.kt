@@ -31,17 +31,28 @@ object GdsReader {
 
     private const val BUFFER_SIZE = 1 shl 20
     private const val PROGRESS_STEP = 1L shl 20
-    private const val CANCEL_POLL_MASK = 4095 // poll isCancelled every 4096 records
+    private const val CANCEL_POLL_MASK = 1023 // poll isCancelled every 1024 records (and after every buffer refill)
+
+    /**
+     * Most bytes the reader accepts after unpacking. Real files of this app are up to a few hundred
+     * MB; a small gzip file can unpack to many GB, which must not eat all memory or time.
+     */
+    const val MAX_UNPACKED_BYTES = 2L shl 30
 
     /**
      * Reads a whole GDSII file (plain or gzip-compressed, detected by the magic bytes). Does not close [input].
      *
-     * Throws [GdsFormatException] with a user-readable message for invalid files, and
-     * [CancellationException] when [isCancelled] returns true (polled every few thousand records).
+     * Throws [GdsFormatException] with a user-readable message for invalid files (also for files
+     * that are larger than [MAX_UNPACKED_BYTES] after unpacking), and
+     * [CancellationException] when [isCancelled] returns true (polled every thousand records and after every buffer refill).
      * [onProgress] is called about every 1 MB with the number of bytes consumed from [input] so far
      * (compressed bytes for .gz files).
      */
-    fun read(input: InputStream, isCancelled: () -> Boolean = { false }, onProgress: ((Long) -> Unit)? = null): Library {
+    fun read(input: InputStream, isCancelled: () -> Boolean = { false }, onProgress: ((Long) -> Unit)? = null): Library =
+        read(input, isCancelled, onProgress, MAX_UNPACKED_BYTES)
+
+    /** [read] with a configurable unpacked size limit (so tests do not need multi-GB inputs). */
+    internal fun read(input: InputStream, isCancelled: () -> Boolean, onProgress: ((Long) -> Unit)?, maxUnpackedBytes: Long): Library {
         try {
             // Peek at the first two bytes to detect gzip, then put them back.
             val pushback = PushbackInputStream(input, 2)
@@ -57,7 +68,7 @@ object GdsReader {
 
             val counting = CountingInputStream(pushback)
             val stream: InputStream = if (gzip) GZIPInputStream(counting, 64 * 1024) else counting
-            return Reader(stream, counting, isCancelled, onProgress).readLibrary()
+            return Reader(stream, counting, isCancelled, onProgress, maxUnpackedBytes).readLibrary()
         } catch (e: EOFException) {
             throw GdsFormatException("File ends unexpectedly")
         } catch (e: ZipException) {
@@ -81,12 +92,14 @@ object GdsReader {
         private val counter: CountingInputStream,
         private val isCancelled: () -> Boolean,
         private val onProgress: ((Long) -> Unit)?,
+        private val maxUnpackedBytes: Long,
     ) {
         // Input buffer: unread bytes are buf[pos until limit].
         private val buf = ByteArray(BUFFER_SIZE)
         private var pos = 0
         private var limit = 0
         private var eof = false
+        private var unpacked = 0L // bytes taken from the (possibly decompressed) stream so far
         private var nextProgress = PROGRESS_STEP
 
         // Current record: type, and its data at buf[dataPos until dataPos + len].
@@ -170,6 +183,10 @@ object GdsReader {
                     eof = true
                 } else {
                     limit += r
+                    unpacked += r
+                    if (unpacked > maxUnpackedBytes) throw GdsFormatException("The file is larger than 2 GB when unpacked.")
+                    // Records can be big and numerous between two polls in readLibrary, so also poll per refill.
+                    if (isCancelled()) throw CancellationException()
                     reportProgress()
                 }
             } while (limit < n && !eof)

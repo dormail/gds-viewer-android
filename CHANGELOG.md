@@ -11,7 +11,17 @@ All notable changes to GDS Viewer. Download APKs from the [Releases page](https:
 
 ### Changed
 
+- **New app ID and signing key, so this version installs as a separate app.** Uninstall the old GDS Viewer (0.7 or earlier) once; your recent files list starts empty. The new ID is `io.github.dormail.gdsviewer`, as needed for Google Play, and the APKs are now signed with a proper release key instead of a development key.
 - The app's data (recent files and their copies, settings) is no longer included in Android backups, so confidential layouts do not end up in a cloud backup.
+
+### Fixed
+
+- Damaged or deliberately crafted files can no longer freeze the app or use up its memory. Cells that contain themselves, huge or nested arrays, zip bombs, very many cells or layers, huge polygons and ruler snapping on crafted arrays all have limits now; normal layouts are not affected. Found with a security review that opened thousands of crafted and corrupted files.
+- An unexpected error while drawing now shows a message instead of closing the app.
+
+### Security
+
+- File names are no longer written to the system log.
 
 ## [0.7] - 2026-10-16
 

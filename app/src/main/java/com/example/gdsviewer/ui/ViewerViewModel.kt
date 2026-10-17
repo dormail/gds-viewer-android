@@ -204,7 +204,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 val idx = withContext(Dispatchers.Default) { LibraryIndex(lib) }
                 Log.i(
                     TAG,
-                    "$name: read in ${readDone - start} ms, indexed in ${SystemClock.elapsedRealtime() - readDone} ms; " +
+                    "read in ${readDone - start} ms, indexed in ${SystemClock.elapsedRealtime() - readDone} ms; " +
                         "${lib.cells.size} cells, ${lib.layers.size} layers",
                 )
                 val cell = idx.defaultTopCell()
@@ -486,6 +486,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 throw e
             } catch (e: OutOfMemoryError) {
                 state = ViewerState.Failed("Not enough memory to show this layout.")
+            } catch (e: Exception) {
+                Log.w(TAG, "scene build failed", e)
+                state = ViewerState.Failed("Could not show this layout: ${e.message ?: e.javaClass.simpleName}")
             } finally {
                 slowTimer.cancel()
                 sceneSlow = false
@@ -537,8 +540,13 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.Default) {
             try {
                 cache.ensure(chunks, MESH_BATCH_BYTES) { !isActive }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: OutOfMemoryError) {
                 return@launch // stop streaming; what is on screen stays
+            } catch (e: Exception) {
+                Log.w(TAG, "building meshes failed", e)
+                return@launch
             }
             done()
         }

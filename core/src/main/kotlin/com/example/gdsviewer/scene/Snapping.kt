@@ -11,10 +11,17 @@ object Snapping {
     private const val MAX_DEPTH = 64
     private const val MAX_SHAPES = 300_000
 
+    /** Limit of steps (cell instances, shapes and outline points looked at) per call: well under 100 ms on a desktop. */
+    private const val MAX_WORK = 1_500_000L
+
     /**
      * Returns the snapped point as doubleArrayOf(x, y) in world µm, or null if nothing is within
      * [radius] (world µm). Corners within radius / 2 win over edges. Only shapes on layers with
      * visibleLayers[layerIndex] == true count.
+     *
+     * Throws [CancellationException] when [isCancelled] returns true (polled regularly). Hostile
+     * files (huge arrays, reference loops, enormous polygons) cannot make it run long: after a
+     * fixed amount of work it stops looking and returns the best point found so far.
      */
     fun snap(
         index: LibraryIndex,
@@ -43,6 +50,7 @@ object Snapping {
         private val library = index.library
         private var examined = 0
         private var polls = 0
+        private var work = 0L
 
         private var bestCorner = (radius / 2) * (radius / 2)
         private var cornerX = 0.0; private var cornerY = 0.0; private var foundCorner = false
@@ -63,7 +71,8 @@ object Snapping {
         }
 
         fun visit(cell: Int, t: Affine, depth: Int) {
-            if (depth > MAX_DEPTH || examined > MAX_SHAPES) return
+            if (depth > MAX_DEPTH || examined > MAX_SHAPES || work > MAX_WORK) return
+            work++
             poll()
             val b = index.bounds.bounds(cell) ?: return
             if (!b.transformed(t).intersects(query)) return
@@ -97,7 +106,7 @@ object Snapping {
                     for (row in range[2]..range[3]) {
                         for (col in range[0]..range[1]) {
                             visit(child, t * refs.transform(r, col, row), depth + 1)
-                            if (examined > MAX_SHAPES) return
+                            if (examined > MAX_SHAPES || ++work > MAX_WORK) return
                         }
                     }
                 }
@@ -109,6 +118,7 @@ object Snapping {
             val rects = chunk.rects
             for (k in 0 until (rects?.size ?: rs.size)) {
                 val i = rects?.get(k) ?: k
+                if (++work > MAX_WORK) return
                 if (!visible(rs.layer[i])) continue
                 val x0 = rs.xy[4 * i].toDouble(); val y0 = rs.xy[4 * i + 1].toDouble()
                 val x1 = rs.xy[4 * i + 2].toDouble(); val y1 = rs.xy[4 * i + 3].toDouble()
@@ -125,6 +135,8 @@ object Snapping {
                 val i = polys?.get(k) ?: k
                 if (!visible(ps.layer[i])) continue
                 val n = ps.pointCount(i)
+                work += n
+                if (work > MAX_WORK) return
                 val first = ps.start[i]
                 var x0 = Double.MAX_VALUE; var y0 = Double.MAX_VALUE; var x1 = -Double.MAX_VALUE; var y1 = -Double.MAX_VALUE
                 for (j in 0 until n) {
@@ -145,6 +157,8 @@ object Snapping {
                 val i = paths?.get(k) ?: k
                 if (!visible(ws.layer[i])) continue
                 val n = ws.pointCount(i)
+                work += 4L * n // building the outline costs more than a polygon's points
+                if (work > MAX_WORK) return
                 val first = ws.start[i]
                 // Generous growth: half the width, times 4 for sharp mitered corners, plus end extensions.
                 val grow = 2.0 * Math.abs(ws.width[i].toDouble()) +
