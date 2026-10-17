@@ -4,6 +4,10 @@ All notable changes to GDS Viewer. Download APKs from the [Releases page](https:
 
 ## [Unreleased]
 
+### Added
+
+- The project is now under the MIT license, and the README credits KLayout, whose design the large-file support follows, and the icons and libraries it uses.
+
 ## [0.7] - 2026-10-16
 
 ### Added

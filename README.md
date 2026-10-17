@@ -164,3 +164,13 @@ The app's ID is `com.example.gdsviewer`. It is fine for development, but change 
 
 - Android Basics with Compose (free course): https://developer.android.com/courses/android-basics-compose/course
 - Kotlin documentation: https://kotlinlang.org/docs/getting-started.html
+
+## Credits
+
+- [KLayout](https://www.klayout.de) by Matthias Köfferlein. The way this app handles large layouts follows KLayout's design: the cell hierarchy is kept instead of flattened, only what is on screen is drawn, and shapes smaller than a few pixels are drawn as dots. KLayout was also used to check that the app draws the test layouts correctly. No KLayout code is used; this app was written from scratch.
+- Icons: [Material Symbols](https://github.com/google/material-design-icons) by Google, under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+- Built with Kotlin, Jetpack Compose, the AndroidX libraries and Gradle, all under the Apache License 2.0.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The icons and libraries listed under Credits keep their own licenses.
