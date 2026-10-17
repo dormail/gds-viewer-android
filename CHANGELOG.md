@@ -4,6 +4,8 @@ All notable changes to GDS Viewer. Download APKs from the [Releases page](https:
 
 ## [Unreleased]
 
+## [0.8] - 2026-10-17
+
 ### Added
 
 - The project is now under the MIT license, and the README credits [KLayout](https://github.com/KLayout/klayout), whose design the large-file support follows, and the icons and libraries it uses.
@@ -107,7 +109,8 @@ First version.
 
 - A crash when opening the layer list.
 
-[Unreleased]: https://github.com/dormail/gds-viewer-android/compare/v0.7...HEAD
+[Unreleased]: https://github.com/dormail/gds-viewer-android/compare/v0.8...HEAD
+[0.8]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.8
 [0.7]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.7
 [0.6]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.6
 [0.5]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.5

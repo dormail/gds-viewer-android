@@ -478,7 +478,8 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                     Log.i(
                         TAG,
                         "scene: ${list.groups.size} chunks, ${stats.instances} instances, ${stats.tinyItems} tiny; " +
-                            "traversal ${stats.traversalMillis} ms, meshes ${stats.meshMillis} ms",
+                            "traversal ${stats.traversalMillis} ms, meshes ${stats.meshMillis} ms" +
+                            if (stats.budgetExceeded) "; simplified (work or overdraw limit reached)" else "",
                     )
                     if (frame === f) drawList = list
                 } while (sceneAgain && sceneOutdated())

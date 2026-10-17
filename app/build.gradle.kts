@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.dormail.gdsviewer"
         minSdk = 26
         targetSdk = 37
-        versionCode = 7
-        versionName = "0.7"
+        versionCode = 8
+        versionName = "0.8"
     }
 
     // The release key is read from ~/.gradle/gradle.properties (gdsviewer.storeFile etc.), never
