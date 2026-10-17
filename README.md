@@ -72,7 +72,7 @@ You can also skip `adb`: copy the APK file to the phone (by USB, cloud storage o
 
 ## How it works
 
-For the curious, here is the pipeline. It works like KLayout: the cell hierarchy is never flattened, so a layout of a few hundred MB fits in a phone's memory even if it would have billions of shapes when expanded.
+For the curious, here is the pipeline. It works like [KLayout](https://github.com/KLayout/klayout): the cell hierarchy is never flattened, so a layout of a few hundred MB fits in a phone's memory even if it would have billions of shapes when expanded.
 
 1. `GdsReader` reads the binary GDSII records into a compact database (`db/`): shapes are stored in packed number arrays per cell, not as one object each. Rectangles, including straight wires, take 20 bytes.
 2. `LibraryIndex` computes every cell's bounding box (per layer too) and splits cells with many shapes into tiles ("chunks") of about 2000 shapes.
@@ -149,7 +149,7 @@ Some words you will see along the way:
 ## Ideas for next steps
 
 - Draw text labels.
-- Read KLayout `.lyp` layer files for layer names and colors.
+- Read [KLayout](https://github.com/KLayout/klayout) `.lyp` layer files for layer names and colors.
 - Custom layer colors chosen in the app.
 - Save the processed index of recent files, so they reopen even faster.
 - Remember the last opened file.
@@ -167,7 +167,7 @@ The app's ID is `com.example.gdsviewer`. It is fine for development, but change 
 
 ## Credits
 
-- [KLayout](https://www.klayout.de) by Matthias Köfferlein. The way this app handles large layouts follows KLayout's design: the cell hierarchy is kept instead of flattened, only what is on screen is drawn, and shapes smaller than a few pixels are drawn as dots. KLayout was also used to check that the app draws the test layouts correctly. No KLayout code is used; this app was written from scratch.
+- [KLayout](https://github.com/KLayout/klayout) by Matthias Köfferlein ([klayout.de](https://www.klayout.de)). The way this app handles large layouts follows KLayout's design: the cell hierarchy is kept instead of flattened, only what is on screen is drawn, and shapes smaller than a few pixels are drawn as dots. KLayout was also used to check that the app draws the test layouts correctly. No KLayout code is used; this app was written from scratch.
 - Icons: [Material Symbols](https://github.com/google/material-design-icons) by Google, under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 - Built with Kotlin, Jetpack Compose, the AndroidX libraries and Gradle, all under the Apache License 2.0.
 

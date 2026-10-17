@@ -6,7 +6,7 @@ All notable changes to GDS Viewer. Download APKs from the [Releases page](https:
 
 ### Added
 
-- The project is now under the MIT license, and the README credits KLayout, whose design the large-file support follows, and the icons and libraries it uses.
+- The project is now under the MIT license, and the README credits [KLayout](https://github.com/KLayout/klayout), whose design the large-file support follows, and the icons and libraries it uses.
 - A privacy policy, published with GitHub Pages from the `docs/` folder.
 
 ### Changed
@@ -17,7 +17,7 @@ All notable changes to GDS Viewer. Download APKs from the [Releases page](https:
 
 ### Added
 
-- Large files: layouts of 100-200 MB now open and show completely. A 150 MB standard-cell layout (100 million shapes when expanded) opens in about 2 seconds. The app works like KLayout: the cell hierarchy is kept instead of expanded, only what is on screen is drawn, and shapes smaller than a few pixels are drawn as dots.
+- Large files: layouts of 100-200 MB now open and show completely. A 150 MB standard-cell layout (100 million shapes when expanded) opens in about 2 seconds. The app works like [KLayout](https://github.com/KLayout/klayout): the cell hierarchy is kept instead of expanded, only what is on screen is drawn, and shapes smaller than a few pixels are drawn as dots.
 - While a file is read, the progress is shown in MB.
 - A thin progress bar appears at the top when preparing a new view takes a moment.
 
