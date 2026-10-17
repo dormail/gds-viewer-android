@@ -36,39 +36,15 @@ GDS Viewer is a read-only GDSII layout viewer for Android phones and tablets. Op
 4. If the file has several cells, open the cell picker and choose the top cell (or any sub-block you want to inspect).
 5. Turn on the ruler, drag between two points, and read the length in µm.
 
-## Running the app on your phone (with Android Studio)
+## Building and installing
 
-This is the recommended path if you are new to Android development.
-
-1. Install Android Studio from https://developer.android.com/studio. On Linux, download the tarball, extract it, and run `bin/studio.sh` from the extracted folder.
-   - The JDK and Android SDK used for command-line builds are already installed in `~/Android/jdk` and `~/Android/Sdk`.
-   - Android Studio should detect and reuse `~/Android/Sdk`. If it asks for an SDK location, point it there.
-2. In Android Studio, choose **File → Open** and select this project folder.
-3. Wait for "Gradle sync" to finish. The first time it downloads dependencies, which can take a few minutes.
-4. Prepare your phone:
-   1. Go to **Settings → About phone** and tap "Build number" seven times. This enables Developer options.
-   2. Go to **Settings → System → Developer options** and turn on "USB debugging".
-   3. Connect the phone to your computer with a USB cable and accept the "Allow USB debugging?" prompt on the phone.
-5. In the toolbar of Android Studio, select your phone in the device dropdown, then press the green ▶ **Run** button.
-
-**Alternative:** you can debug over Wi-Fi instead of USB. Turn on **Developer options → Wireless debugging** on the phone, then use "Pair devices using Wi-Fi" in Android Studio.
-
-## Building from the command line (without Android Studio)
-
-Run these from the project folder:
+You need a JDK (version 17 or newer) and the Android SDK, with `ANDROID_HOME` set to the SDK folder. Build the APK from the project folder:
 
 ```
-export JAVA_HOME=~/Android/jdk ANDROID_HOME=~/Android/Sdk
-./gradlew assembleRelease        # builds app/build/outputs/apk/release/app-release.apk
-~/Android/Sdk/platform-tools/adb install -r app/build/outputs/apk/release/app-release.apk
-./gradlew test                   # runs the unit tests
+./gradlew assembleRelease
 ```
 
-Use the release build for real files: it is optimized and opens big layouts about 20 times faster than a debug build (`./gradlew assembleDebug`). Both are signed with this computer's debug key, so they install over each other. Before publishing on Google Play, set up a proper release key.
-
-The `adb install` line needs the phone connected over USB with USB debugging enabled, as above. If `adb` cannot see the phone, run `~/Android/Sdk/platform-tools/adb devices` and check that the phone is listed as `device` (not `unauthorized`). If it says `unauthorized`, unlock the phone and accept the debugging prompt.
-
-You can also skip `adb`: copy the APK file to the phone (by USB, cloud storage or e-mail) and open it there. Android will ask you to allow "install unknown apps" for the app you opened it from.
+The APK is then at `app/build/outputs/apk/release/app-release.apk`. Move it to your phone yourself, for example with a USB cable or through cloud storage, and open it there to install it. Android asks you once to allow "Install unknown apps" for the app you opened it from, such as Files or Drive. Developer options are only needed if you install over USB with `adb install`.
 
 ## How it works
 
@@ -134,9 +110,7 @@ Some words you will see along the way:
 - **Gradle**: the build tool. `./gradlew` is the project's own copy of it, so you do not need to install it separately.
 - **JDK**: the Java Development Kit. Kotlin code is compiled with it, so the build needs it even though you write Kotlin.
 - **SDK**: the Android Software Development Kit, the libraries and tools that Android apps are built against.
-- **adb**: the Android Debug Bridge, a command-line tool that talks to the phone over USB or Wi-Fi.
 - **Jetpack Compose**: the library for building the user interface. It describes the screen as Kotlin functions, which is similar in spirit to describing a layout in code.
-- **Gradle sync**: Android Studio reading the build files and downloading libraries. Run it again after changing `build.gradle.kts` or `gradle/libs.versions.toml`.
 - **applicationId**: the app's unique name on a phone, written as a reverse domain name (see the note below).
 
 ## Limits
