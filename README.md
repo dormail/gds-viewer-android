@@ -171,6 +171,10 @@ The app's ID is `com.example.gdsviewer`. It is fine for development, but change 
 - Icons: [Material Symbols](https://github.com/google/material-design-icons) by Google, under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 - Built with Kotlin, Jetpack Compose, the AndroidX libraries and Gradle, all under the Apache License 2.0.
 
+## Privacy
+
+The app collects no data and has no internet access. The privacy policy (needed for Google Play) is in [docs/privacy/index.html](docs/privacy/index.html) and is published with GitHub Pages at https://dormail.github.io/gds-viewer-android/privacy/ once Pages is turned on for the repository (Settings → Pages → Deploy from a branch → `main`, folder `/docs`).
+
 ## License
 
 MIT, see [LICENSE](LICENSE). The icons and libraries listed under Credits keep their own licenses.
