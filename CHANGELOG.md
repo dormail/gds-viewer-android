@@ -12,7 +12,7 @@ All notable changes to GDS Viewer. Download APKs from the [Releases page](https:
 ### Changed
 
 - **New app ID and signing key, so this version installs as a separate app.** Uninstall the old GDS Viewer (0.7 or earlier) once; your recent files list starts empty. The new ID is `io.github.dormail.gdsviewer`, as needed for Google Play, and the APKs are now signed with a proper release key instead of a development key.
-- The app's data (recent files and their copies, settings) is no longer included in Android backups, so confidential layouts do not end up in a cloud backup.
+- The app's data (recent files and their copies, settings) is no longer included in Android backups or in transfers to a new phone, so confidential layouts do not end up in a cloud backup.
 
 ### Fixed
 

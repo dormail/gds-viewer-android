@@ -4,15 +4,32 @@ plugins {
 }
 
 android {
-    namespace = "com.example.gdsviewer"
+    namespace = "io.github.dormail.gdsviewer"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.example.gdsviewer"
+        applicationId = "io.github.dormail.gdsviewer"
         minSdk = 26
         targetSdk = 37
         versionCode = 7
         versionName = "0.7"
+    }
+
+    // The release key is read from ~/.gradle/gradle.properties (gdsviewer.storeFile etc.), never
+    // from the repository. Without it, release builds fall back to this computer's debug key, so
+    // anyone can build the app; only APKs signed with the release key update the published app.
+    val releaseStoreFile = providers.gradleProperty("gdsviewer.storeFile").orNull
+    signingConfigs {
+        if (releaseStoreFile != null) {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = providers.gradleProperty("gdsviewer.storePassword").get()
+                keyAlias = providers.gradleProperty("gdsviewer.keyAlias").get()
+                keyPassword = providers.gradleProperty("gdsviewer.keyPassword").get()
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
     }
 
     buildTypes {
@@ -21,9 +38,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Signed with this machine's debug key, like the debug builds, so installed copies can be
-            // updated in place. Use a real release key before publishing on Google Play.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

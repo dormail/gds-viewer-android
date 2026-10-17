@@ -93,7 +93,7 @@ build.gradle.kts           build configuration (root and app)
 settings.gradle.kts        project configuration
 ```
 
-The `...` stands for the package path (for example `com/example/gdsviewer`). Look at the actual folders to see the exact layout.
+The `...` stands for the package path (for example `io/github/dormail/gdsviewer`). Look at the actual folders to see the exact layout.
 
 To regenerate the sample layout:
 
@@ -130,9 +130,15 @@ Some words you will see along the way:
 - Double-tap to zoom.
 - Measuring along edges, and area measurement.
 
-## Note on the app ID
+## App ID and signing
 
-The app's ID is `com.example.gdsviewer`. It is fine for development, but change it in `app/build.gradle.kts` before you ever publish the app to Google Play, because the ID must be unique.
+The app ID is `io.github.dormail.gdsviewer`. The APKs on the Releases page are signed with the project's release key, certificate SHA-256:
+
+```
+B2:81:8B:81:CF:BA:3C:43:ED:D7:81:8C:83:18:62:10:29:21:7C:39:B4:1D:69:DE:20:05:49:19:FC:8F:CA:0E
+```
+
+An APK you build yourself is signed with your computer's debug key instead. Android only installs an update signed with the same key, so uninstall the published app before installing your own build, and the other way round.
 
 ## Learning resources
 
