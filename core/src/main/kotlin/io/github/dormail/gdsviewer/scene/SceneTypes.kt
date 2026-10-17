@@ -147,6 +147,17 @@ class ChunkMesh(
 ) {
     val vertexCount: Int get() = vertices.size / 2
 
+    /**
+     * True if every index points at an existing vertex. Checked before the mesh goes to the GPU:
+     * the graphics driver is native code, and OpenGL ES 3.0 leaves an out-of-range index undefined.
+     */
+    fun indicesInRange(): Boolean {
+        val n = vertexCount
+        for (i in triangles) if (i !in 0 until n) return false
+        for (i in lines) if (i !in 0 until n) return false
+        return true
+    }
+
     /** Approximate memory use in bytes (also used for GPU budgets). */
     val byteSize: Long get() = 4L * (vertices.size + triangles.size + lines.size)
 }

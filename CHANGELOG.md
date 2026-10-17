@@ -4,6 +4,11 @@ All notable changes to GDS Viewer. Download APKs from the [Releases page](https:
 
 ## [Unreleased]
 
+### Security
+
+- Other apps can no longer make the viewer open a file from its own private storage, such as the saved copies of your recent files. Before, such a file was only shown on your screen and nothing left the app, but it is now refused.
+- Shapes are checked before they are handed to the phone's graphics driver, so a fault in the app's geometry code cannot make the driver read memory outside the shape.
+
 ## [0.8] - 2026-10-17
 
 ### Added

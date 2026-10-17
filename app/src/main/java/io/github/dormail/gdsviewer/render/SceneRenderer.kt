@@ -515,7 +515,8 @@ class SceneRenderer : GLSurfaceView.Renderer {
         var vbo = 0
         var ebo = 0
 
-        if (vertexFloats > 0 && triangleCount + lineCount > 0) {
+        // A mesh with a bad index is never uploaded (it then draws nothing); see indicesInRange.
+        if (vertexFloats > 0 && triangleCount + lineCount > 0 && mesh.indicesInRange()) {
             vbo = newBuffer()
             GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo)
             val floats = stagingFloats(vertexFloats * 4)

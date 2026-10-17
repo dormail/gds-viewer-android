@@ -252,6 +252,35 @@ class MaliciousInputTest {
     }
 
     @Test(timeout = 20_000)
+    fun meshIndicesStayInRangeForGarbageGeometry() {
+        // Random, degenerate and extreme shapes and paths: every index must point at a vertex,
+        // because the meshes go straight to the graphics driver.
+        val r = Random(7)
+        val big = Int.MAX_VALUE
+        val bytes = G().apply {
+            cell("A") {
+                for (k in 0 until 200) {
+                    val n = 3 + r.nextInt(if (k % 10 == 0) 3000 else 40)
+                    boundary(1 + k % 5, 0, *randomPolygon(n, k.toLong(), if (k % 3 == 0) 4 else 1_000_000))
+                }
+                boundary(2, 0, 0, 0, 0, 0, 0, 0, 0, 0)                 // all points equal
+                boundary(2, 0, -big, -big, big, -big, big, big, -big, -big) // extreme coordinates
+                for (type in listOf(0, 1, 2, 4)) {
+                    path(3, 0, 50, type, 30, 30, 0, 0, 0, 0, 100, 0, 100, 0, 100, 100) // repeated points
+                    path(3, 0, -40, type, -big, big, 0, 0, 100, 0, 0, 0)                // reversal, odd widths
+                    path(3, 0, big, type, 0, 0, -big, 0, big, 0)
+                }
+            }
+        }.end()
+        val lib = read(bytes)
+        val index = LibraryIndex(lib)
+        for (chunk in index.content(0).chunks) {
+            val mesh = MeshBuilder.build(lib, chunk)
+            assertTrue("bad index in chunk ${chunk.id}", mesh.indicesInRange())
+        }
+    }
+
+    @Test(timeout = 20_000)
     fun ordinaryConcavePolygonsAreStillFilled() {
         // A 2000-point star: concave, needs real ear clipping.
         val n = 2000

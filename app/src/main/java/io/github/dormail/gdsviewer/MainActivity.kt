@@ -1,5 +1,6 @@
 package io.github.dormail.gdsviewer
 
+import android.content.ContentResolver
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
@@ -70,6 +71,9 @@ class MainActivity : ComponentActivity() {
                 IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
             else -> null
         }
-        if (uri != null) vm.openUri(uri)
+        // Only content:// URIs, which come with their own read grant. The intent filters already
+        // ask for them, but another app can bypass the filters with an explicit intent, and with a
+        // file:// URI this app would open its own private files on that app's behalf.
+        if (uri != null && uri.scheme == ContentResolver.SCHEME_CONTENT) vm.openUri(uri)
     }
 }
