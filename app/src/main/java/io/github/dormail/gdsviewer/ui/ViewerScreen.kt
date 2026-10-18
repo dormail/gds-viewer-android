@@ -55,6 +55,7 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
     var showCells by remember { mutableStateOf(false) }
     var showRecents by remember { mutableStateOf(false) }
     var showTheme by remember { mutableStateOf(false) }
+    var showAbout by remember { mutableStateOf(false) }
     val canvas = canvasColor(LocalDarkTheme.current)
     var menuOpen by remember { mutableStateOf(false) }
     val ready = vm.state is ViewerState.Ready
@@ -129,6 +130,10 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
                                 text = { Text("Open sample layout") },
                                 onClick = { menuOpen = false; vm.openSample() },
                             )
+                            DropdownMenuItem(
+                                text = { Text("About") },
+                                onClick = { menuOpen = false; showAbout = true },
+                            )
                         }
                     }
                 },
@@ -172,6 +177,7 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
     if (showLayers && ready) LayerSheet(vm, onDismiss = { showLayers = false })
     if (showTheme) ThemeDialog(vm.themeMode, onSelect = { vm.chooseTheme(it); showTheme = false }, onDismiss = { showTheme = false })
     if (showRecents) RecentFilesDialog(vm, onDismiss = { showRecents = false })
+    if (showAbout) AboutDialog(onDismiss = { showAbout = false })
     if (showCells && ready) CellPickerDialog(vm, onDismiss = { showCells = false })
 }
 

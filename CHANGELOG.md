@@ -4,6 +4,10 @@ All notable changes to GDS Viewer. Download APKs from the [Releases page](https:
 
 ## [Unreleased]
 
+### Added
+
+- An About screen under ⋮ → About, with the version, links to the source code, problem reports and the privacy policy, the license and the credits.
+
 ### Security
 
 - Other apps can no longer make the viewer open a file from its own private storage, such as the saved copies of your recent files. Before, such a file was only shown on your screen and nothing left the app, but it is now refused.

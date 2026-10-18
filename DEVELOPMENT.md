@@ -51,6 +51,7 @@ app/                       the Android app
     java/.../ui/LayoutViewer.kt       layout view, gestures, ruler, scale bar
     java/.../ui/LayerSheet.kt         layer list
     java/.../ui/CellPickerDialog.kt   cell chooser
+    java/.../ui/AboutDialog.kt        About screen (version, links, license, credits)
     java/.../ui/theme/                colors and fonts
     res/                              icons, strings, backup rules
     assets/sample.gds                 built-in sample layout

@@ -30,6 +30,7 @@ The app needs Android 8 or newer.
 - **Ruler:** tap the ruler button and drag between two points to read the length, dx and dy in µm. The ends snap to corners and edges of shapes (you can turn snapping off in the ⋮ menu), and you can drag an end to adjust it.
 - **Scale bar** in the corner, and a **light and dark theme** (⋮ → Theme).
 - A **built-in sample layout**, so you can try the app without a file of your own.
+- ⋮ → **About** shows the version, the license, the credits and links to the source code and the privacy policy.
 
 The app reads the full cell hierarchy: references and arrays (with rotation, mirroring and magnification), polygons, paths and boxes.
 
