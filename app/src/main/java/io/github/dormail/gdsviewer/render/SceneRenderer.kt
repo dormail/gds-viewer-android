@@ -10,6 +10,8 @@ import io.github.dormail.gdsviewer.scene.Chunk
 import io.github.dormail.gdsviewer.scene.ChunkMesh
 import io.github.dormail.gdsviewer.scene.DrawList
 import io.github.dormail.gdsviewer.scene.MeshCache
+import io.github.dormail.gdsviewer.scene.RasterCompositor
+import io.github.dormail.gdsviewer.scene.RasterLayerStyle
 import io.github.dormail.gdsviewer.scene.TinyRaster
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -102,8 +104,7 @@ class SceneRenderer : GLSurfaceView.Renderer {
     private var meshColorLocation = 0
     private var rasterProgram = 0
     private var rasterMatrixLocation = 0
-    private var rasterColorLocation = 0
-    private var rasterTextureLocation = 0
+    private var rasterImageLocation = 0
     private var instanceBuffer = 0
     private var instanceBufferBytes = 0
     private var quadBuffer = 0
@@ -130,8 +131,24 @@ class SceneRenderer : GLSurfaceView.Renderer {
     private var layerItems = arrayOfNulls<ArrayList<DrawItem>>(0)
 
     // --- tiny raster ---
-    private var rasterLayers = IntArray(0)
-    private var rasterTextures = IntArray(0)
+    // All raster layers are blended into ONE RGBA texture (see RasterCompositor) that is drawn once,
+    // underneath the vector shapes. It is composed again when a new raster arrives or when the layer
+    // colors, visibility or the fill opacity change.
+    private val compositor = RasterCompositor()
+    private var rasterTexture = 0
+    private var rasterData: TinyRaster? = null
+    private var rasterLayerCount = 0
+
+    /** Layer index -> true if the current raster has a bitmap for that layer. */
+    private var rasterHasLayer = BooleanArray(0)
+    private var rasterDirty = false
+
+    // The styles (of layers in the raster) and opacity the texture was last composed with.
+    private var composedLayers = IntArray(0)
+    private var composedColors = IntArray(0)
+    private var composedVisible = BooleanArray(0)
+    private var composedCount = -1
+    private var composedAlpha = -1f
 
     private val matrix = FloatArray(16)
     private val idArray = IntArray(2)
@@ -144,8 +161,7 @@ class SceneRenderer : GLSurfaceView.Renderer {
         meshColorLocation = GLES20.glGetUniformLocation(meshProgram, "uColor")
         rasterProgram = buildProgram(RASTER_VERTEX_SHADER, RASTER_FRAGMENT_SHADER)
         rasterMatrixLocation = GLES20.glGetUniformLocation(rasterProgram, "uMatrix")
-        rasterColorLocation = GLES20.glGetUniformLocation(rasterProgram, "uColor")
-        rasterTextureLocation = GLES20.glGetUniformLocation(rasterProgram, "uMask")
+        rasterImageLocation = GLES20.glGetUniformLocation(rasterProgram, "uImage")
 
         val range = FloatArray(2)
         GLES20.glGetFloatv(GLES20.GL_ALIASED_LINE_WIDTH_RANGE, range, 0)
@@ -157,8 +173,13 @@ class SceneRenderer : GLSurfaceView.Renderer {
         instanceBuffer = 0
         instanceBufferBytes = 0
         quadBuffer = 0
-        rasterLayers = IntArray(0)
-        rasterTextures = IntArray(0)
+        rasterTexture = 0
+        rasterData = null
+        rasterLayerCount = 0
+        rasterHasLayer = BooleanArray(0)
+        rasterDirty = false
+        composedCount = -1
+        composedAlpha = -1f
         layerItems = arrayOfNulls(0)
         preparedList = null
         ownerCache = meshes
@@ -207,7 +228,7 @@ class SceneRenderer : GLSurfaceView.Renderer {
                 TAG,
                 "draw list: ${list.groups.size} groups, ${list.stats.instances} instances, " +
                     "${residentBytes shr 20} MB resident, $uploadsPending+$unresolvedCount uploads/missing pending, " +
-                    "${rasterLayers.size} raster layers",
+                    "$rasterLayerCount raster layers",
             )
         }
         if (uploadsPending > 0) requestRender?.invoke()
@@ -225,12 +246,16 @@ class SceneRenderer : GLSurfaceView.Renderer {
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
         GLES20.glLineWidth(lineWidth)
 
+        // The tiny raster first, so the vector shapes are drawn on top of it. It has its own
+        // premultiplied-alpha blending. Note: the raster and the vector shapes of one layer no longer
+        // share the stencil below, so a pixel covered by both can be blended twice (acceptable).
+        drawRasterImage(styles, fillAlpha)
+
         var stencilRef = 0
         for (style in styles) {
             if (!style.visible) continue
             val items = layerItems.getOrNull(style.layer)
-            val texture = rasterTextureOf(style.layer)
-            if (items.isNullOrEmpty() && texture == 0) continue
+            if (items.isNullOrEmpty()) continue
 
             stencilRef++
             if (stencilRef > 255) {
@@ -238,34 +263,29 @@ class SceneRenderer : GLSurfaceView.Renderer {
                 stencilRef = 1
             }
             // Fill: the stencil makes each pixel get blended only once per layer, even where shapes
-            // (or shapes and the tiny raster) of the same layer overlap.
+            // of the same layer overlap.
             GLES20.glEnable(GLES20.GL_STENCIL_TEST)
             GLES20.glStencilFunc(GLES20.GL_NOTEQUAL, stencilRef, 0xFF)
             GLES20.glStencilOp(GLES20.GL_KEEP, GLES20.GL_KEEP, GLES20.GL_REPLACE)
 
-            if (!items.isNullOrEmpty()) {
-                beginMeshDrawing(style.color, fillAlpha)
-                for (item in items) {
-                    if (item.triangleCount == 0) continue
-                    item.mesh.lastUsed = frame
-                    drawItem(item, GLES20.GL_TRIANGLES, item.triangleOffset, item.triangleCount)
-                }
+            beginMeshDrawing(style.color, fillAlpha)
+            for (item in items) {
+                if (item.triangleCount == 0) continue
+                item.mesh.lastUsed = frame
+                drawItem(item, GLES20.GL_TRIANGLES, item.triangleOffset, item.triangleCount)
             }
-            if (texture != 0) drawRaster(texture, style.color, fillAlpha)
 
             // Outlines at full alpha, no stencil. Skipped when shapes are too small to see an outline.
             GLES20.glDisable(GLES20.GL_STENCIL_TEST)
-            if (!items.isNullOrEmpty()) {
-                var begun = false
-                for (item in items) {
-                    if (item.lineCount == 0 || item.shapeSize * viewScale < MIN_OUTLINE_PIXELS) continue
-                    if (!begun) {
-                        beginMeshDrawing(style.color, 1f)
-                        begun = true
-                    }
-                    item.mesh.lastUsed = frame
-                    drawItem(item, GLES20.GL_LINES, item.lineOffset, item.lineCount)
+            var begun = false
+            for (item in items) {
+                if (item.lineCount == 0 || item.shapeSize * viewScale < MIN_OUTLINE_PIXELS) continue
+                if (!begun) {
+                    beginMeshDrawing(style.color, 1f)
+                    begun = true
                 }
+                item.mesh.lastUsed = frame
+                drawItem(item, GLES20.GL_LINES, item.lineOffset, item.lineCount)
             }
         }
         GLES20.glDisable(GLES20.GL_STENCIL_TEST)
@@ -298,15 +318,22 @@ class SceneRenderer : GLSurfaceView.Renderer {
         GLES30.glDrawElementsInstanced(mode, count, mesh.indexType, offset, item.instanceCount)
     }
 
-    /** Draws the quad of one raster layer's bitmap (not instanced, so the instance divisors are reset). */
-    private fun drawRaster(texture: Int, argb: Int, alpha: Float) {
+    /**
+     * Draws the composed raster image as one quad (not instanced, so the instance divisors are reset).
+     * The image already has premultiplied alpha, hence the blend function (ONE, ONE_MINUS_SRC_ALPHA);
+     * the normal blend function is restored afterwards.
+     */
+    private fun drawRasterImage(styles: List<SceneLayerStyle>, fillAlpha: Float) {
+        if (rasterData == null || rasterTexture == 0) return
+        if (rasterDirty || rasterStylesChanged(styles, fillAlpha)) composeRaster(styles, fillAlpha)
+        if (composedCount <= 0) return
         endMeshDrawing()
+        GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
         GLES20.glUseProgram(rasterProgram)
         GLES20.glUniformMatrix4fv(rasterMatrixLocation, 1, false, matrix, 0)
-        setColor(rasterColorLocation, argb, alpha)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
-        GLES20.glUniform1i(rasterTextureLocation, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, rasterTexture)
+        GLES20.glUniform1i(rasterImageLocation, 0)
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, quadBuffer)
         GLES20.glEnableVertexAttribArray(0)
         GLES20.glEnableVertexAttribArray(1)
@@ -316,6 +343,47 @@ class SceneRenderer : GLSurfaceView.Renderer {
         GLES20.glDisableVertexAttribArray(1)
         GLES20.glDisableVertexAttribArray(0)
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+    }
+
+    /** True if the raster's layers, as styled now, differ from what the texture was composed with. Does not allocate. */
+    private fun rasterStylesChanged(styles: List<SceneLayerStyle>, fillAlpha: Float): Boolean {
+        if (fillAlpha != composedAlpha) return true
+        var n = 0
+        for (s in styles) {
+            if (s.layer < 0 || s.layer >= rasterHasLayer.size || !rasterHasLayer[s.layer]) continue
+            if (n >= composedCount || composedLayers[n] != s.layer ||
+                composedColors[n] != s.color || composedVisible[n] != s.visible
+            ) return true
+            n++
+        }
+        return n != composedCount
+    }
+
+    /** Blends the raster's layers into one RGBA image (see [RasterCompositor]) and uploads it to the texture. */
+    private fun composeRaster(styles: List<SceneLayerStyle>, fillAlpha: Float) {
+        val raster = rasterData ?: return
+        val used = styles.filter { it.layer >= 0 && it.layer < rasterHasLayer.size && rasterHasLayer[it.layer] }
+        composedCount = used.size
+        composedAlpha = fillAlpha
+        composedLayers = IntArray(used.size) { used[it].layer }
+        composedColors = IntArray(used.size) { used[it].color }
+        composedVisible = BooleanArray(used.size) { used[it].visible }
+        rasterDirty = false
+        if (used.isEmpty()) return
+
+        val image = compositor.compose(raster, used.map { RasterLayerStyle(it.layer, it.color, it.visible) }, fillAlpha)
+        val bytes = raster.width * raster.height * 4
+        val buffer = stagingBytes(bytes)
+        buffer.put(image, 0, bytes)
+        buffer.position(0)
+        GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, rasterTexture)
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, raster.width, raster.height, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer,
+        )
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
     }
 
     /** Resets the attribute state that the instancing program changes, so other programs see defaults. */
@@ -337,11 +405,6 @@ class SceneRenderer : GLSurfaceView.Renderer {
             (argb and 0xFF) / 255f,
             alpha,
         )
-    }
-
-    private fun rasterTextureOf(layer: Int): Int {
-        for (i in rasterLayers.indices) if (rasterLayers[i] == layer) return rasterTextures[i]
-        return 0
     }
 
     /** Builds the world-to-clip-space matrix (column-major) from a world-to-screen transform and the surface size. */
@@ -410,35 +473,29 @@ class SceneRenderer : GLSurfaceView.Renderer {
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
     }
 
-    /** One R8 texture per raster layer (0 or 255 per pixel) plus the quad's corners in anchor-relative world coordinates. */
+    /**
+     * Remembers the raster and creates its (still empty) texture; the image itself is composed at the
+     * next draw, with the styles of that moment. Also uploads the quad's corners (anchor-relative world coordinates).
+     */
     private fun uploadRaster(list: DrawList, raster: TinyRaster) {
         val w = raster.width
         val h = raster.height
         if (w <= 0 || h <= 0 || raster.layers.isEmpty()) return
-        val count = raster.layers.size
-        val textures = IntArray(count)
-        GLES20.glGenTextures(count, textures, 0)
-        GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1)
-        for (k in 0 until count) {
-            val bits = raster.bits[k]
-            val pixels = stagingBytes(w * h)
-            for (i in 0 until w * h) {
-                val set = bits[i ushr 6] and (1L shl (i and 63)) != 0L
-                pixels.put(i, if (set) 255.toByte() else 0.toByte())
-            }
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textures[k])
+        if (rasterTexture == 0) {
+            GLES20.glGenTextures(1, idArray, 0)
+            rasterTexture = idArray[0]
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, rasterTexture)
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-            GLES20.glTexImage2D(
-                GLES20.GL_TEXTURE_2D, 0, GLES30.GL_R8, w, h, 0,
-                GLES30.GL_RED, GLES20.GL_UNSIGNED_BYTE, pixels,
-            )
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
         }
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
-        rasterLayers = raster.layers.copyOf()
-        rasterTextures = textures
+        rasterData = raster
+        rasterLayerCount = raster.layers.size
+        rasterHasLayer = BooleanArray((raster.layers.maxOrNull() ?: -1) + 1)
+        for (l in raster.layers) if (l >= 0) rasterHasLayer[l] = true
+        rasterDirty = true
 
         // Quad corners: raster pixels -> world, minus the anchor so the frame's matrix applies.
         val toWorld = raster.worldToRaster.inverse()
@@ -461,9 +518,17 @@ class SceneRenderer : GLSurfaceView.Renderer {
     }
 
     private fun deleteRasterTextures() {
-        if (rasterTextures.isNotEmpty()) GLES20.glDeleteTextures(rasterTextures.size, rasterTextures, 0)
-        rasterTextures = IntArray(0)
-        rasterLayers = IntArray(0)
+        if (rasterTexture != 0) {
+            idArray[0] = rasterTexture
+            GLES20.glDeleteTextures(1, idArray, 0)
+        }
+        rasterTexture = 0
+        rasterData = null
+        rasterLayerCount = 0
+        rasterHasLayer = BooleanArray(0)
+        rasterDirty = false
+        composedCount = -1
+        composedAlpha = -1f
     }
 
     // ---------------------------------------------------------------- mesh residency
@@ -761,13 +826,12 @@ void main() {
 """
         const val RASTER_FRAGMENT_SHADER = """#version 300 es
 precision mediump float;
-uniform vec4 uColor;
-uniform sampler2D uMask;
+uniform sampler2D uImage;
 in vec2 vUv;
 out vec4 fragColor;
 void main() {
-    if (texture(uMask, vUv).r < 0.5) discard;
-    fragColor = uColor;
+    // Premultiplied RGBA of all raster layers, already blended (see RasterCompositor).
+    fragColor = texture(uImage, vUv);
 }
 """
     }

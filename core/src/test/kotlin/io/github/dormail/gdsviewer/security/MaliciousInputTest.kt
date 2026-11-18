@@ -13,6 +13,7 @@ import io.github.dormail.gdsviewer.scene.LibraryIndex
 import io.github.dormail.gdsviewer.scene.MeshBuilder
 import io.github.dormail.gdsviewer.scene.MeshCache
 import io.github.dormail.gdsviewer.scene.SceneBuilder
+import io.github.dormail.gdsviewer.scene.SceneRaster
 import io.github.dormail.gdsviewer.scene.SceneRequest
 import io.github.dormail.gdsviewer.scene.Snapping
 import org.junit.Assert.assertEquals
@@ -189,7 +190,10 @@ class MaliciousInputTest {
             cell("A") { boundary(1, 0, 0, 0, 100_000_000, 0, 100_000_000, 100_000_000, 0, 100_000_000, 0, 0); sref("B", 0, 0) }
         }.end()
         val (list, _) = fitScene(bytes)
-        assertTrue(list.raster!!.layers.size <= 129)
+        val raster = list.raster!!
+        val totalBytes = raster.bits.sumOf { it.size.toLong() * 8 }
+        assertTrue(raster.layers.size < layers)
+        assertTrue(totalBytes <= SceneRaster.MAX_BITMAP_BYTES + raster.bits[0].size * 8L)
 
         // And the same layers spread over many cells (per-cell work must not depend on the layer count).
         val spread = G().apply {

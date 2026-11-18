@@ -7,9 +7,9 @@ import kotlin.math.floor
 /**
  * The per-layer bitmaps of a [TinyRaster] while they are being filled. One bit per raster pixel;
  * a layer's bitmap is only allocated when something is first drawn into it. At most
- * [MAX_BITMAPS] bitmaps are made: later layers all draw into one shared bitmap (shown in the
- * color of the first layer that did not get its own), so memory stays bounded for files with
- * thousands of layers.
+ * [MAX_BITMAP_BYTES] bytes of bitmaps are made in total (about 400 layers on a phone screen): later
+ * layers all draw into one shared bitmap (shown in the color of the first layer that did not get its
+ * own), so memory stays bounded for files with thousands of layers.
  */
 internal class SceneRaster(val width: Int, val height: Int, val worldToRaster: Affine, layerCount: Int) {
     private val bits = arrayOfNulls<LongArray>(layerCount)
@@ -63,7 +63,7 @@ internal class SceneRaster(val width: Int, val height: Int, val worldToRaster: A
 
     private fun bitmapFor(layer: Int): LongArray {
         bits[layer]?.let { return it }
-        if (bitmapCount < MAX_BITMAPS) {
+        if ((bitmapCount + 1L) * words * 8 <= MAX_BITMAP_BYTES) {
             bitmapCount++
             return LongArray(words.toInt()).also { bits[layer] = it }
         }
@@ -95,8 +95,8 @@ internal class SceneRaster(val width: Int, val height: Int, val worldToRaster: A
         return TinyRaster(width, height, worldToRaster, used.toIntArray(), Array(used.size) { bits[used[it]]!! })
     }
 
-    private companion object {
-        /** Own bitmaps (about 180 KB each for a phone screen). Real designs have far fewer layers in view. */
-        const val MAX_BITMAPS = 128
+    companion object {
+        /** Memory budget for the layers' own bitmaps (about 170 KB each for a phone screen). Security limit: see DEVELOPMENT.md. */
+        const val MAX_BITMAP_BYTES = 64L shl 20
     }
 }

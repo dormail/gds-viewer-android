@@ -68,7 +68,7 @@ The app opens files from untrusted sources (mail attachments, downloads), so tre
 
 - **No permissions at all**, in particular no `INTERNET`. Check the merged manifest of the release APK (`aapt2 dump permissions`) after adding a library.
 - **Only `content://` URIs from other apps.** `MainActivity` is exported, and an explicit intent skips the intent filters, so the scheme check in `handleIntent` is what stops other apps from making the viewer open its own private files.
-- **Every loop over file data has a limit.** Reference loops are skipped, and there are budgets for the scene walk (`SceneBuilder.MAX_WORK`, `MAX_OVERDRAW`), unpacked size (`GdsReader.MAX_UNPACKED_BYTES`, 2 GiB), layer count (`LibraryBuilder.MAX_LAYERS`), ear clipping (`Triangulator.MAX_EAR_CLIP_STEPS`), snapping (`Snapping.MAX_WORK`) and bitmaps (`SceneRaster.MAX_BITMAPS`). Normal layouts stay far below them; the stress files must not hit them.
+- **Every loop over file data has a limit.** Reference loops are skipped, and there are budgets for the scene walk (`SceneBuilder.MAX_WORK`, `MAX_OVERDRAW`), unpacked size (`GdsReader.MAX_UNPACKED_BYTES`, 2 GiB), layer count (`LibraryBuilder.MAX_LAYERS`), ear clipping (`Triangulator.MAX_EAR_CLIP_STEPS`), snapping (`Snapping.MAX_WORK`) and bitmaps (`SceneRaster.MAX_BITMAP_BYTES`, 64 MiB). Normal layouts stay far below them; the stress files must not hit them.
 - **Meshes are checked before they reach the GPU driver** (`ChunkMesh.indicesInRange`).
 - **Errors never crash the app:** loading and drawing catch exceptions and out-of-memory errors and show a message.
 - **No file names or layout data in the system log.**
