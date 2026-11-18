@@ -4,6 +4,8 @@ All notable changes to GDS Viewer. Download APKs from the [Releases page](https:
 
 ## [Unreleased]
 
+## [0.9] - 2026-11-18
+
 ### Added
 
 - **DXF files** (ASCII DXF, e.g. for gray-scale lithography) open like GDS files, also with "Open with" and "Share". Closed polylines, circles, solids and blocks are drawn; lines, arcs, hatches and text are skipped. Layers named by a gray value (0–255) are colored by that value, from dark purple (low) to yellow (high), so the picture reads like the gray-scale.
@@ -124,7 +126,8 @@ First version.
 
 - A crash when opening the layer list.
 
-[Unreleased]: https://github.com/dormail/gds-viewer-android/compare/v0.8...HEAD
+[Unreleased]: https://github.com/dormail/gds-viewer-android/compare/v0.9...HEAD
+[0.9]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.9
 [0.8]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.8
 [0.7]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.7
 [0.6]: https://github.com/dormail/gds-viewer-android/releases/tag/v0.6
