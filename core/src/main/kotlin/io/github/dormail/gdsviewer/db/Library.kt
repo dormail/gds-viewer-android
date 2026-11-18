@@ -131,6 +131,10 @@ class RefStore internal constructor(
 ) {
     val size: Int get() = cell.size
 
+    /** The same placements pointing at other cells ([newCell] has one entry per placement); all other arrays are shared, not copied. */
+    internal fun withCells(newCell: IntArray): RefStore =
+        RefStore(newCell, x, y, orientation, extra, extraMirror, extraMag, extraAngle, extraCols, extraRows, extraSteps)
+
     fun isArray(i: Int): Boolean = columns(i) > 1 || rows(i) > 1
 
     fun columns(i: Int): Int = extra[i].let { if (it < 0) 1 else extraCols[it] }
