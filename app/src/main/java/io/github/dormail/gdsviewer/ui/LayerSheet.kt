@@ -14,6 +14,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -26,10 +29,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
+import io.github.dormail.gdsviewer.R
 import androidx.compose.ui.graphics.Color
 import io.github.dormail.gdsviewer.ui.theme.LayerPalette
 import io.github.dormail.gdsviewer.ui.theme.LocalDarkTheme
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import java.text.NumberFormat
 
@@ -56,8 +63,38 @@ fun LayerSheet(vm: ViewerViewModel, onDismiss: () -> Unit) {
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
         )
         val numbers = NumberFormat.getIntegerInstance(LocalConfiguration.current.locales[0])
+        // With several files open, a header row (name, show/hide switch, remove button) starts each file's layers.
+        val groups = vm.isOverlay
+        val rows: List<Any> = if (!groups) vm.layers else buildList {
+            for (f in vm.files.sortedBy { it.file }) {
+                add(f)
+                addAll(vm.layers.filter { it.key.file == f.file })
+            }
+        }
         LazyColumn {
-            items(vm.layers, key = { it.key.toString() }) { layer ->
+            items(rows, key = { if (it is OpenFile) "file${it.file}" else (it as LayerUi).key.toString() }) { row ->
+                if (row is OpenFile) {
+                    val mine = vm.layers.filter { it.key.file == row.file }
+                    ListItem(
+                        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+                        headlineContent = { Text("@${row.file}  ${row.name}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        supportingContent = { Text("${mine.size} layers") },
+                        trailingContent = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Switch(
+                                    checked = mine.any { it.visible },
+                                    onCheckedChange = { vm.setFileVisible(row.file, it) },
+                                    modifier = Modifier.semantics { contentDescription = "Show file ${row.file}" },
+                                )
+                                IconButton(onClick = { vm.removeFile(row.file) }) {
+                                    Icon(painterResource(R.drawable.ic_close), contentDescription = "Remove file ${row.file}, ${row.name}")
+                                }
+                            }
+                        },
+                    )
+                    return@items
+                }
+                val layer = row as LayerUi
                 val dark = LocalDarkTheme.current
                 val color = Color(LayerPalette.color(layer.key, layer.paletteIndex, dark))
                 ListItem(

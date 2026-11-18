@@ -16,6 +16,7 @@ import io.github.dormail.gdsviewer.ui.theme.LayerPalette
 import io.github.dormail.gdsviewer.data.RecentFiles
 import io.github.dormail.gdsviewer.db.LayoutReader
 import io.github.dormail.gdsviewer.db.Library
+import io.github.dormail.gdsviewer.db.LibraryMerge
 import io.github.dormail.gdsviewer.gds.LayerKey
 import io.github.dormail.gdsviewer.geometry.Affine
 import io.github.dormail.gdsviewer.scene.Box
@@ -55,6 +56,12 @@ sealed interface ViewerState {
  */
 data class LayerUi(val key: LayerKey, val layer: Int, val paletteIndex: Int, val visible: Boolean, val shapeCount: Long)
 
+/**
+ * One file that is open. [file] is its number ("@2" in layer names); it stays the same while other
+ * files are added or removed. [topCell] is the cell of [library] that is shown.
+ */
+class OpenFile(val name: String, val library: Library, val topCell: Int, val file: Int)
+
 /** A measuring line between two points, in world coordinates (µm). */
 data class Ruler(val x1: Double, val y1: Double, val x2: Double, val y2: Double)
 
@@ -77,7 +84,22 @@ private sealed interface Source {
  */
 class ViewerViewModel(application: Application) : AndroidViewModel(application) {
     var state: ViewerState by mutableStateOf(ViewerState.Empty); private set
-    var fileName: String? by mutableStateOf(null); private set
+    /** All open files. One entry is the normal case; more than one means they are shown on top of each other. */
+    var files: List<OpenFile> by mutableStateOf(emptyList()); private set
+    /** What the top bar shows: the file name, or the first name plus "+1", "+2"... with several files. */
+    val fileName: String?
+        get() = when (files.size) {
+            0 -> null
+            1 -> files[0].name
+            else -> "${files[0].name} +${files.size - 1}"
+        }
+    /** True when several files are shown on top of each other. */
+    val isOverlay: Boolean get() = files.size > 1
+    /** Progress text while a file is being added (the current view stays visible), else null. */
+    var addProgress: String? by mutableStateOf(null); private set
+    /** A short message for a Snackbar, such as "Could not add this file". The screen clears it with [messageShown]. */
+    var message: String? by mutableStateOf(null); private set
+    fun messageShown() { message = null }
     var library: Library? by mutableStateOf(null); private set
     /** The cell being shown and its coordinate frame, or null before a file has loaded. */
     var frame: CellFrame? by mutableStateOf(null); private set
@@ -138,15 +160,20 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     // ---------------------------------------------------------------- loading
 
-    fun openUri(uri: Uri) {
+    private fun displayName(uri: Uri): String {
         val resolver = getApplication<Application>().contentResolver
-        val name = try {
+        return try {
             resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
                 if (it.moveToFirst()) it.getString(0) else null
             }
         } catch (e: Exception) {
             null
         } ?: uri.lastPathSegment ?: "layout"
+    }
+
+    fun openUri(uri: Uri) {
+        val resolver = getApplication<Application>().contentResolver
+        val name = displayName(uri)
         load(name, Source.External(uri)) {
             resolver.openInputStream(uri) ?: throw java.io.IOException("Cannot open the file.")
         }
@@ -217,7 +244,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 index = idx
                 meshes = cache
                 sceneBuilder = SceneBuilder(idx, cache)
-                fileName = name
+                files = listOf(OpenFile(name, lib, cell.index, 1))
                 buildCell(cell.index)
                 // Remember the file only now that it has loaded successfully.
                 withContext(Dispatchers.IO) {
@@ -241,6 +268,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     private fun unloadFile() {
         sceneJob?.cancel()
         library = null
+        files = emptyList()
         index = null
         meshes = null
         sceneBuilder = null
@@ -257,7 +285,17 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         val name = lib.cells[cell].name
         state = ViewerState.Loading("Preparing $name…")
         val counts = withContext(Dispatchers.Default) { LayerStats.shapeCounts(lib, cell) }
-        val previous = layers.associate { it.key to it.visible }
+        showCell(cell, counts, layers.associate { it.key to it.visible }, keepView = false)
+    }
+
+    /**
+     * Switches to [cell] of the already assigned [library]/[index]. [previous] says which layers
+     * were visible (by key; layers not in it are visible). With [keepView] the zoom and position stay.
+     * Does no slow work, so it cannot fail halfway.
+     */
+    private fun showCell(cell: Int, counts: LongArray, previous: Map<LayerKey, Boolean>, keepView: Boolean) {
+        val lib = library ?: return
+        val idx = index ?: return
         sceneJob?.cancel()
         drawList = null
         frame = idx.frame(cell)
@@ -268,13 +306,18 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         ruler = null
         dragEnd = 0
         state = ViewerState.Ready
-        fitToView()
+        if (!keepView) fitToView()
         requestScene()
     }
 
     fun selectCell(name: String) {
         val cell = library?.cell(name) ?: return
+        if (!isOverlay) {
+            // Remember the choice, so adding a file later starts from this cell.
+            files = files.map { OpenFile(it.name, it.library, cell.index, it.file) }
+        }
         loadJob?.cancel()
+        addProgress = null
         loadJob = viewModelScope.launch {
             try {
                 buildCell(cell.index)
@@ -286,6 +329,132 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 state = ViewerState.Failed(e.message ?: "Could not build this cell.")
             }
         }
+    }
+
+    // ---------------------------------------------------------------- overlay
+
+    /** Adds the file behind [uri] to the ones shown (picked with "Add file to view"). */
+    fun addUri(uri: Uri) {
+        addFile(uri, displayName(uri))
+    }
+
+    /**
+     * Reads the file [uri] and shows it on top of the open files. Unlike [load] this never replaces
+     * the current layout: on any problem the view stays as it was and only a short [message] appears.
+     */
+    fun addFile(uri: Uri, name: String) {
+        if (state !is ViewerState.Ready || files.isEmpty() || addProgress != null) return
+        if (files.size >= LibraryMerge.MAX_PARTS) {
+            message = "At most ${LibraryMerge.MAX_PARTS} files can be shown on top of each other."
+            return
+        }
+        val resolver = getApplication<Application>().contentResolver
+        val current = files
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
+            try {
+                addProgress = "Reading $name…"
+                val lib = withContext(Dispatchers.IO) {
+                    val input = resolver.openInputStream(uri) ?: throw java.io.IOException("Cannot open the file.")
+                    input.use {
+                        LayoutReader.read(it, isCancelled = { !isActive }) { bytes ->
+                            addProgress = "Reading $name… ${bytes shr 20} MB"
+                        }
+                    }
+                }
+                addProgress = "Indexing $name…"
+                val top = withContext(Dispatchers.Default) { LibraryIndex(lib).defaultTopCell() }
+                if (top == null) throw java.io.IOException("This file contains no cells.")
+                val used = current.map { it.file }.toSet()
+                val number = (1..LibraryMerge.MAX_PARTS).first { it !in used }
+                rebuild(current + OpenFile(name, lib, top.index, number))
+                withContext(Dispatchers.IO) { recents.record(uri, name) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: OutOfMemoryError) {
+                message = "Not enough memory to add $name."
+            } catch (e: Exception) {
+                message = "Could not add $name: ${e.message ?: "unknown error"}"
+            } finally {
+                addProgress = null
+            }
+        }
+    }
+
+    /** Takes file number [file] out of the overlay. The last remaining file cannot be removed. */
+    fun removeFile(file: Int) {
+        val current = files
+        if (current.size < 2 || current.none { it.file == file } || addProgress != null) return
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
+            try {
+                addProgress = "Updating…"
+                rebuild(current.filter { it.file != file })
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: OutOfMemoryError) {
+                message = "Not enough memory to update the view."
+            } catch (e: Exception) {
+                message = "Could not remove the file: ${e.message ?: "unknown error"}"
+            } finally {
+                addProgress = null
+            }
+        }
+    }
+
+    /**
+     * Shows exactly [newFiles]: one file directly, several merged into one overlay library. All the
+     * slow work happens first; only when it succeeded are the new library and layers swapped in,
+     * so a failure leaves the current view untouched. Keeps zoom and position.
+     */
+    private suspend fun rebuild(newFiles: List<OpenFile>) {
+        val oldFiles = files
+        val single = newFiles.size == 1
+        val lib: Library
+        val top: Int
+        val shown: List<OpenFile>
+        if (single) {
+            // Back to the normal single-file path: no merge, layer keys have file = 0.
+            val f = newFiles[0]
+            shown = listOf(OpenFile(f.name, f.library, f.topCell, 1))
+            lib = f.library
+            top = f.topCell
+        } else {
+            shown = newFiles
+            lib = withContext(Dispatchers.Default) {
+                LibraryMerge.merge(newFiles.map { LibraryMerge.Part(it.library, it.topCell, it.file) })
+            }
+            top = lib.cell("Overlay")?.index ?: throw java.io.IOException("Could not combine the files.")
+        }
+        val idx = withContext(Dispatchers.Default) { LibraryIndex(lib) }
+        val counts = withContext(Dispatchers.Default) { LayerStats.shapeCounts(lib, top) }
+        val cache = MeshCache(lib)
+
+        // Carry layer visibility over by key. A lone file's keys have file = 0; in an overlay they
+        // carry the file number (a lone file always counts as number 1).
+        val wasOverlay = oldFiles.size > 1
+        val previous = HashMap<LayerKey, Boolean>()
+        for (l in layers) {
+            val k = l.key
+            val mapped = when {
+                !wasOverlay && !single -> k.copy(file = oldFiles[0].file)
+                wasOverlay && single -> if (k.file == newFiles[0].file) k.copy(file = 0) else null
+                else -> k
+            }
+            if (mapped != null) previous[mapped] = l.visible
+        }
+
+        library = lib
+        index = idx
+        meshes = cache
+        sceneBuilder = SceneBuilder(idx, cache)
+        files = shown
+        showCell(top, counts, previous, keepView = true)
+    }
+
+    /** Shows or hides all layers of file number [file] of the overlay. */
+    fun setFileVisible(file: Int, visible: Boolean) {
+        layers = layers.map { if (it.key.file == file) it.copy(visible = visible) else it }
     }
 
     // ----------------------------------------------------------------- layers

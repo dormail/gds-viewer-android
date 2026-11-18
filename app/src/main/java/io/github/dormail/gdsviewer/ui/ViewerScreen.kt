@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -23,11 +24,15 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,6 +56,18 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
         if (uri != null) vm.openUri(uri)
     }
     val openFile = { picker.launch(arrayOf("*/*")) }
+    // "Add file to view": only content:// addresses come from the picker, like for "Open file".
+    val addPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) vm.addUri(uri)
+    }
+    val snackbar = remember { SnackbarHostState() }
+    val message = vm.message
+    LaunchedEffect(message) {
+        if (message != null) {
+            snackbar.showSnackbar(message)
+            vm.messageShown()
+        }
+    }
     var showLayers by remember { mutableStateOf(false) }
     var showCells by remember { mutableStateOf(false) }
     var showRecents by remember { mutableStateOf(false) }
@@ -62,6 +79,7 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
 
     Scaffold(
         containerColor = canvas,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = {
@@ -106,6 +124,11 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
                                     onClick = { menuOpen = false; showCells = true },
                                 )
                                 DropdownMenuItem(
+                                    text = { Text("Add file to view…") },
+                                    enabled = vm.addProgress == null,
+                                    onClick = { menuOpen = false; addPicker.launch(arrayOf("*/*")) },
+                                )
+                                DropdownMenuItem(
                                     text = { Text("Lock rotation") },
                                     trailingIcon = if (vm.rotationLocked) ({ CheckIcon() }) else null,
                                     onClick = { menuOpen = false; vm.toggleRotationLock() },
@@ -148,6 +171,17 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
             // GPU memory are reused instead of being created anew for every file.
             val state = vm.state
             if (state is ViewerState.Ready || state is ViewerState.Loading) LayoutViewer(vm)
+            // While a file is added or removed, the layout stays visible with a thin progress bar on top.
+            vm.addProgress?.let { text ->
+                Column(Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text(
+                        text, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(8.dp),
+                    )
+                }
+            }
             when (val s = state) {
                 ViewerState.Empty -> StartColumn(vm, verticalSpacing = 12.dp) {
                     Icon(
