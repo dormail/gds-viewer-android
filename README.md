@@ -1,6 +1,6 @@
 # GDS Viewer for Android
 
-Look at GDSII chip layouts on your Android phone or tablet. Open a `.gds` or `.gds.gz` file, zoom and rotate around, switch layers on and off, and measure distances. Big layouts of 100–200 MB open in a few seconds. The app only views layouts; it does not edit them.
+Look at GDSII and DXF chip layouts on your Android phone or tablet. Open a `.gds`, `.gds.gz` or `.dxf` file, zoom and rotate around, switch layers on and off, and measure distances. Big layouts of 100–200 MB open in a few seconds. The app only views layouts; it does not edit them.
 
 **Download:** get the latest APK from the [Releases page](https://github.com/dormail/gds-viewer-android/releases). What changed in each version: [CHANGELOG.md](CHANGELOG.md).
 
@@ -18,13 +18,14 @@ The app needs Android 8 or newer.
 
 ## What it can do
 
-- **Open files** with the folder button, or from a file manager, an e-mail or another app with "Open with" or "Share". Both `.gds` and gzip-packed `.gds.gz` files work.
+- **Open files** with the folder button, or from a file manager, an e-mail or another app with "Open with" or "Share". GDSII (`.gds`, gzip-packed `.gds.gz`) and ASCII DXF (`.dxf`) files work.
 - **Recent files:** your last 8 files are on the start screen and under ⋮ → Recent files. Long-press the app icon on your home screen to reopen one of the 4 newest directly.
 - **Move around:** drag to pan, pinch to zoom, twist two fingers to rotate.
   - Double-tap to zoom in, tap with two fingers to zoom out.
   - Double-tap and hold, then slide down or up to zoom in or out with one finger.
   - Rotation clicks into place at 0°, 90°, 180° and 270°. The compass button turns the layout back to 0°, and ⋮ → Lock rotation turns rotating off.
   - The "fit to screen" button shows the whole layout again.
+- **Several files on top of each other:** ⋮ → Add file to view overlays another file, for example a gray-scale DXF over the chip layout. Layers are then named "layer@file", such as "1/0@1" or "83@2", and the layer list has a group per file with a switch to hide that file and a button to remove it.
 - **Layers:** open the layer list to show or hide a layer with a tap. Long-press a layer to show only that one, or use All / None.
 - **Cells:** choose which cell to look at. Top cells are listed first, and you can search by name.
 - **Ruler:** tap the ruler button and drag between two points to read the length, dx and dy in µm. The ends snap to corners and edges of shapes (you can turn snapping off in the ⋮ menu), and you can drag an end to adjust it.
@@ -32,7 +33,7 @@ The app needs Android 8 or newer.
 - A **built-in sample layout**, so you can try the app without a file of your own.
 - ⋮ → **About** shows the version, the license, the credits and links to the source code and the privacy policy.
 
-The app reads the full cell hierarchy: references and arrays (with rotation, mirroring and magnification), polygons, paths and boxes.
+The app reads the full cell hierarchy: references and arrays (with rotation, mirroring and magnification), polygons, paths and boxes. From DXF files it reads closed polylines (also with arcs), polylines with a width, circles, solids, and blocks with inserts and insert arrays; lines, arcs, splines, hatches and text are skipped. DXF layers named by a gray value from 0 to 255 (gray-scale lithography) are colored by that value, dark purple for low values and yellow for high ones.
 
 ## First steps
 
@@ -45,7 +46,8 @@ The app reads the full cell hierarchy: references and arrays (with rotation, mir
 ## Good to know
 
 - **Text labels** are read but not drawn yet.
-- **Layer names and colors** from KLayout `.lyp` files are not used yet; layers are shown by number with automatic colors.
+- **Layer names and colors** from KLayout `.lyp` files are not used yet; GDS layers are shown by number with automatic colors, DXF layers by their name.
+- **DXF units:** the drawing unit is taken from the file header and is micrometers when the file does not say. Binary DXF files are not supported; save them as ASCII DXF.
 - **Large files:** layouts of 100–150 MB have been tested, including one with 100 million shapes when fully expanded. Much bigger files can run out of memory; the app then shows a message.
 - **Files from "Open with" or "Share"** are kept as a private copy inside the app (up to 100 MB each, 300 MB in total), because Android only lets the app read them briefly. Removing a file from the recent list deletes its copy.
 - The app needs OpenGL ES 3.0, which every phone from the last ten years has.

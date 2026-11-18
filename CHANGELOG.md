@@ -6,7 +6,13 @@ All notable changes to GDS Viewer. Download APKs from the [Releases page](https:
 
 ### Added
 
+- **DXF files** (ASCII DXF, e.g. for gray-scale lithography) open like GDS files, also with "Open with" and "Share". Closed polylines, circles, solids and blocks are drawn; lines, arcs, hatches and text are skipped. Layers named by a gray value (0–255) are colored by that value, from dark purple (low) to yellow (high), so the picture reads like the gray-scale.
+- **Several files on top of each other:** ⋮ → Add file to view puts another GDS or DXF file over the open one, for example the gray-scale DXF over the chip layout. Layers are shown as "layer@file" (e.g. "83@2"), and the layer list has one group per file with a switch to hide the whole file and a button to remove it again. Up to 8 files.
 - An About screen under ⋮ → About, with the version, links to the source code, problem reports and the privacy policy, the license and the credits.
+
+### Changed
+
+- Zoomed-out views of files with many layers (more than 128) now show every layer in its own color and use much less graphics memory.
 
 ### Security
 

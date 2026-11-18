@@ -17,12 +17,13 @@ The whole app was written by Claude (Anthropic's coding assistant) for a reposit
 
 The design follows [KLayout](https://github.com/KLayout/klayout): the cell hierarchy is never flattened, so a layout of a few hundred MB fits in a phone's memory even if it would have billions of shapes when expanded.
 
-1. `GdsReader` reads the binary GDSII records into a compact database (`db/`): shapes are stored in packed number arrays per cell, not as one object each. Rectangles, including straight wires, take 20 bytes.
+1. `LayoutReader` looks at the first bytes of a file and hands it to `GdsReader` or `DxfReader`. Both fill the same compact database (`db/`) through `LibraryBuilder`. Shapes are stored in packed number arrays per cell, not as one object each. Rectangles, including straight wires, take 20 bytes.
 2. `LibraryIndex` computes every cell's bounding box (per layer too) and splits cells with many shapes into tiles ("chunks") of about 2000 shapes (at most 4096 shapes and 65535 vertices).
 3. `MeshBuilder` turns each chunk into triangles and outlines once (`Triangulator`, `PathGeometry`). The meshes are uploaded to the GPU in batches.
-4. Whenever the view changes a lot, `SceneBuilder` walks the hierarchy in the background. It skips everything off screen, works out directly which elements of an array are visible, and draws anything smaller than a few pixels into a per-layer bitmap instead (`SceneRaster`). The result is a draw list: which chunks to draw, and where.
+4. Whenever the view changes a lot, `SceneBuilder` walks the hierarchy in the background. It skips everything off screen, works out directly which elements of an array are visible, and draws anything smaller than a few pixels into a per-layer bitmap instead (`SceneRaster`; the renderer blends all these bitmaps into one image with `RasterCompositor`). The result is a draw list: which chunks to draw, and where.
 5. `SceneRenderer` (OpenGL ES 3.0) draws each chunk once per placement with GPU instancing, so panning and zooming stay smooth. Fills are semi-transparent and drawn once per layer using the stencil buffer, so overlapping shapes do not get darker.
-6. The user interface is built with Jetpack Compose, in the `ui/` package. `ViewerViewModel` holds the app state and survives screen rotation.
+6. Several files on top of each other ("overlay") are merged into one `Library` by `LibraryMerge`: every file's cells are renamed `name@file`, layers get a file number (`LayerKey.file`, shown as `83@2`), and a new top cell places each file's top cell at the origin. The big coordinate arrays are shared with the per-file libraries, not copied, so the steps above work unchanged.
+7. The user interface is built with Jetpack Compose, in the `ui/` package. `ViewerViewModel` holds the app state and survives screen rotation.
 
 ## Project structure
 
@@ -30,11 +31,14 @@ The design follows [KLayout](https://github.com/KLayout/klayout): the cell hiera
 core/                      plain Kotlin, no Android code (so it can be unit-tested on the desktop)
   src/main/kotlin/.../
     db/Library.kt          the compact layout database (cells, packed shape arrays, placements)
+    db/LayoutReader.kt     picks the reader from the file's first bytes (GDS or DXF)
     db/GdsReader.kt        reads GDSII binary records into it
+    db/LibraryMerge.kt     several files in one library, for showing them on top of each other
     dxf/DxfReader.kt       reads ASCII DXF (polylines, circles, solids, blocks and inserts) into the same database
     scene/LibraryIndex.kt  bounding boxes and per-cell tiles ("chunks")
     scene/MeshBuilder.kt   chunk to triangles and outlines; MeshCache.kt keeps them until uploaded
     scene/SceneBuilder.kt  what to draw for the current view (culling, level of detail)
+    scene/RasterCompositor.kt  blends the per-layer bitmaps of tiny shapes into one image
     scene/Snapping.kt      ruler snapping
     scene/SceneTypes.kt    the data types shared by these steps
     geometry/Affine.kt     transforms (translate, rotate, mirror, scale)
@@ -92,6 +96,9 @@ The app opens files from untrusted sources (mail attachments, downloads), so tre
 - Reopen the last file when the app starts.
 - Measuring along edges, and area measurement.
 - Files with about a million empty cells still run out of memory (the app shows a message).
+- Tabs: several files open, one shown at a time (issue #9). Inactive tabs would keep their `Library` but drop their index and meshes, with a limit on how many stay loaded.
+- DXF: hatches, layer colors from the file, and reporting shapes that were skipped (too many points, unsupported entities).
+- Compose the tiny-raster image off the GL thread if it causes stutter on slow phones (`SceneRenderer.composeRaster`).
 
 ## Android terms in plain language
 
