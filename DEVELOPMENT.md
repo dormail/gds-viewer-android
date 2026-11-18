@@ -31,6 +31,7 @@ core/                      plain Kotlin, no Android code (so it can be unit-test
   src/main/kotlin/.../
     db/Library.kt          the compact layout database (cells, packed shape arrays, placements)
     db/GdsReader.kt        reads GDSII binary records into it
+    dxf/DxfReader.kt       reads ASCII DXF (polylines, circles, solids, blocks and inserts) into the same database
     scene/LibraryIndex.kt  bounding boxes and per-cell tiles ("chunks")
     scene/MeshBuilder.kt   chunk to triangles and outlines; MeshCache.kt keeps them until uploaded
     scene/SceneBuilder.kt  what to draw for the current view (culling, level of detail)
@@ -68,7 +69,7 @@ The app opens files from untrusted sources (mail attachments, downloads), so tre
 
 - **No permissions at all**, in particular no `INTERNET`. Check the merged manifest of the release APK (`aapt2 dump permissions`) after adding a library.
 - **Only `content://` URIs from other apps.** `MainActivity` is exported, and an explicit intent skips the intent filters, so the scheme check in `handleIntent` is what stops other apps from making the viewer open its own private files.
-- **Every loop over file data has a limit.** Reference loops are skipped, and there are budgets for the scene walk (`SceneBuilder.MAX_WORK`, `MAX_OVERDRAW`), unpacked size (`GdsReader.MAX_UNPACKED_BYTES`, 2 GiB), layer count (`LibraryBuilder.MAX_LAYERS`), ear clipping (`Triangulator.MAX_EAR_CLIP_STEPS`), snapping (`Snapping.MAX_WORK`) and bitmaps (`SceneRaster.MAX_BITMAP_BYTES`, 64 MiB). Normal layouts stay far below them; the stress files must not hit them.
+- **Every loop over file data has a limit.** Reference loops are skipped, and there are budgets for the scene walk (`SceneBuilder.MAX_WORK`, `MAX_OVERDRAW`), unpacked size (`GdsReader.MAX_UNPACKED_BYTES`, 2 GiB), layer count (`LibraryBuilder.MAX_LAYERS`), ear clipping (`Triangulator.MAX_EAR_CLIP_STEPS`), snapping (`Snapping.MAX_WORK`), bitmaps (`SceneRaster.MAX_BITMAP_BYTES`, 64 MiB) and the DXF reader (`DxfReader.MAX_LINE_BYTES` 4096, `MAX_POINTS` 8192 per polygon or path including arc pieces, `MAX_NAME_BYTES`, `MAX_BLOCKS` 100000, `MAX_ARRAY_COUNT` 65535, `MAX_BYTES` 2 GiB). Normal layouts stay far below them; the stress files must not hit them.
 - **Meshes are checked before they reach the GPU driver** (`ChunkMesh.indicesInRange`).
 - **Errors never crash the app:** loading and drawing catch exceptions and out-of-memory errors and show a message.
 - **No file names or layout data in the system log.**

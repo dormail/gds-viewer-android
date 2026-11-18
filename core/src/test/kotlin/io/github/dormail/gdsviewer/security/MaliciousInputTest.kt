@@ -1,8 +1,10 @@
 package io.github.dormail.gdsviewer.security
 
 import io.github.dormail.gdsviewer.db.GdsReader
+import io.github.dormail.gdsviewer.db.LayoutReader
 import io.github.dormail.gdsviewer.db.Library
 import io.github.dormail.gdsviewer.db.LibraryBuilder
+import io.github.dormail.gdsviewer.dxf.DxfReader
 import io.github.dormail.gdsviewer.gds.GdsFormatException
 import io.github.dormail.gdsviewer.gds.TestGdsWriter
 import io.github.dormail.gdsviewer.geometry.Affine
@@ -351,5 +353,121 @@ class MaliciousInputTest {
         assertTrue(chunks.size >= 5)
         assertTrue(chunks.all { it.shapeCount <= 4096 })
         assertEquals(20_000, chunks.sumOf { it.shapeCount })
+    }
+
+    // ---------------------------------------------------------------- 6. hostile DXF files
+
+    private fun dxfPairs(vararg p: Any): String = p.toList().chunked(2).joinToString("") { "${it[0]}\n${it[1]}\n" }
+    private fun dxfEntities(body: String) = "0\nSECTION\n2\nENTITIES\n$body" + "0\nENDSEC\n0\nEOF\n"
+
+    /** Reads [text] as DXF: it must end in a valid library or a GdsFormatException, quickly. */
+    private fun dxfOutcome(text: ByteArray): Library? = try {
+        DxfReader.read(ByteArrayInputStream(text))
+    } catch (_: GdsFormatException) {
+        null
+    }
+
+    @Test(timeout = 20_000)
+    fun dxfLongLineAndGarbage() {
+        assertEquals(null, dxfOutcome(("0\nSECTION\n2\n" + "A".repeat(100_000) + "\n").toByteArray()))
+        assertEquals(null, dxfOutcome(ByteArray(5_000_000) { 'x'.code.toByte() }))
+        // Garbage after a valid start.
+        assertEquals(null, dxfOutcome("0\nSECTION\n2\nENTITIES\nnot a group code\n0\nENDSEC\n".toByteArray()))
+        val rnd = Random(7)
+        repeat(30) {
+            val junk = ByteArray(20_000).also { rnd.nextBytes(it) }
+            dxfOutcome("0\nSECTION\n2\nENTITIES\n".toByteArray() + junk)
+        }
+        // Binary data that begins like DXF, also through the format detection.
+        val binary = "0\nSECTION\n".toByteArray() + ByteArray(100_000) { (it * 31).toByte() }
+        try { LayoutReader.read(ByteArrayInputStream(binary)) } catch (_: GdsFormatException) {}
+    }
+
+    @Test(timeout = 20_000)
+    fun dxfTruncatedFiles() {
+        val good = dxfEntities(
+            dxfPairs(0, "LWPOLYLINE", 70, 1, 10, 0, 20, 0, 10, 5, 20, 0, 10, 5, 20, 5, 0, "POLYLINE", 70, 1, 0, "VERTEX", 10, 1, 20, 1) +
+                dxfPairs(0, "INSERT", 2, "B", 70, 2, 71, 2, 44, 3, 45, 3),
+        ).toByteArray()
+        for (n in 0..good.size) dxfOutcome(good.copyOf(n))
+    }
+
+    @Test(timeout = 20_000)
+    fun dxfBadNumbers() {
+        for (v in listOf("NaN", "Infinity", "-Infinity", "1e300", "-1e300", "1e999", "99999999999999999999999", "1e-999", "abc", "", "0x10", "1.2.3", "--5")) {
+            dxfOutcome(dxfEntities(dxfPairs(0, "LWPOLYLINE", 70, 1, 10, v, 20, 0, 10, 5, 20, 0, 10, 5, 20, 5)).toByteArray())
+            dxfOutcome(dxfEntities(dxfPairs(0, "CIRCLE", 10, 0, 20, 0, 40, v)).toByteArray())
+            dxfOutcome(dxfEntities(dxfPairs(0, "LWPOLYLINE", 70, 1, 10, 0, 20, 0, 42, v, 10, 5, 20, 0, 10, 5, 20, 5)).toByteArray())
+            dxfOutcome(dxfEntities(dxfPairs(0, "INSERT", 2, "B", 41, v, 42, v, 50, v, 70, v, 44, v)).toByteArray())
+        }
+        assertEquals(null, dxfOutcome(dxfEntities(dxfPairs(0, "CIRCLE", 10, "1e300", 20, 0, 40, 1)).toByteArray()))
+        assertEquals(null, dxfOutcome(dxfEntities(dxfPairs(0, "CIRCLE", 10, "NaN", 20, 0, 40, 1)).toByteArray()))
+    }
+
+    @Test(timeout = 60_000)
+    fun dxfHugeVertexCountsAndBulges() {
+        // More vertices than a polygon may have: dropped, not a crash.
+        val sb = StringBuilder(dxfPairs(0, "LWPOLYLINE", 70, 1, 90, 2_000_000_000))
+        for (i in 0 until 100_000) sb.append("10\n").append(i % 1000).append("\n20\n").append(i / 1000).append("\n42\n1\n")
+        val lib = DxfReader.read(ByteArrayInputStream(dxfEntities(sb.toString()).toByteArray()))
+        assertEquals(0, lib.cell("TOP")!!.shapeCount)
+        // Many arcs that together exceed the point limit.
+        val arcs = StringBuilder(dxfPairs(0, "LWPOLYLINE", 70, 1))
+        for (i in 0 until 8000) arcs.append("10\n").append(i).append("\n20\n").append(i % 7).append("\n42\n1000000\n")
+        assertEquals(0, dxfOutcome(dxfEntities(arcs.toString()).toByteArray())?.cell("TOP")?.shapeCount ?: 0)
+        // POLYLINE with a million VERTEX entities.
+        val pl = StringBuilder(dxfPairs(0, "POLYLINE", 70, 1))
+        for (i in 0 until 200_000) pl.append("0\nVERTEX\n10\n").append(i).append("\n20\n").append(i % 5).append("\n")
+        pl.append("0\nSEQEND\n")
+        assertEquals(0, DxfReader.read(ByteArrayInputStream(dxfEntities(pl.toString()).toByteArray())).cell("TOP")!!.shapeCount)
+    }
+
+    @Test(timeout = 60_000)
+    fun dxfHugeArraysAndReferenceLoops() {
+        val text = "0\nSECTION\n2\nBLOCKS\n" +
+            dxfPairs(0, "BLOCK", 2, "A", 10, 0, 20, 0, 0, "LWPOLYLINE", 70, 1, 10, 0, 20, 0, 10, 1, 20, 0, 10, 1, 20, 1,
+                0, "INSERT", 2, "A", 0, "INSERT", 2, "B", 70, 65535, 71, 65535, 44, 1, 45, 1, 0, "ENDBLK",
+                0, "BLOCK", 2, "B", 10, 0, 20, 0, 0, "INSERT", 2, "A", 70, 65535, 71, 65535, 44, 0, 45, 0, 0, "ENDBLK") +
+            "0\nENDSEC\n" + dxfEntities(dxfPairs(0, "INSERT", 2, "A", 70, 2000000000, 71, 2000000000, 44, 1e9, 45, 1e9, 41, 1e-9, 42, 1e-9, 0, "INSERT", 2, "B", 41, 0, 42, 0, 0, "INSERT", 2, "A", 44, 1e300, 70, 2))
+        val lib = dxfOutcome(text.toByteArray())
+        if (lib != null) {
+            val index = LibraryIndex(lib)
+            val top = index.defaultTopCell()!!
+            val frame = index.frame(top.index)
+            val cache = MeshCache(lib)
+            SceneBuilder(index, cache).build(SceneRequest(frame, Affine.translate(500.0, 500.0) * Affine.scale(1e-3, -1e-3), 1000, 1000))
+        }
+        // Self-reference only.
+        val self = "0\nSECTION\n2\nBLOCKS\n" + dxfPairs(0, "BLOCK", 2, "A", 0, "INSERT", 2, "A", 0, "ENDBLK") + "0\nENDSEC\n" +
+            dxfEntities(dxfPairs(0, "INSERT", 2, "A"))
+        val lib2 = DxfReader.read(ByteArrayInputStream(self.toByteArray()))
+        val idx = LibraryIndex(lib2)
+        idx.frame(idx.defaultTopCell()!!.index)
+    }
+
+    @Test(timeout = 60_000)
+    fun dxfManyLayersAndBlocks() {
+        val layers = StringBuilder()
+        for (i in 0 until 20_000) layers.append("0\nCIRCLE\n8\nlayer").append(i).append("\n40\n1\n")
+        assertEquals(null, dxfOutcome(dxfEntities(layers.toString()).toByteArray()))
+        val blocks = StringBuilder("0\nSECTION\n2\nBLOCKS\n")
+        for (i in 0 until 150_000) blocks.append("0\nBLOCK\n2\nb").append(i).append("\n0\nENDBLK\n")
+        blocks.append("0\nENDSEC\n0\nEOF\n")
+        assertEquals(null, dxfOutcome(blocks.toString().toByteArray()))
+        // Very long names are cut, not rejected.
+        val lib = dxfOutcome(dxfEntities("0\nCIRCLE\n8\n${"L".repeat(3000)}\n40\n1\n").toByteArray())
+        assertTrue(lib!!.layers.single().name!!.length <= 255)
+    }
+
+    @Test(timeout = 20_000)
+    fun dxfCancellationIsHonored() {
+        val big = StringBuilder()
+        for (i in 0 until 200_000) big.append("0\nCIRCLE\n40\n1\n10\n").append(i % 100).append("\n")
+        var calls = 0
+        try {
+            DxfReader.read(ByteArrayInputStream(dxfEntities(big.toString()).toByteArray()), { ++calls > 3 })
+            fail("expected CancellationException")
+        } catch (_: CancellationException) {
+        }
     }
 }
