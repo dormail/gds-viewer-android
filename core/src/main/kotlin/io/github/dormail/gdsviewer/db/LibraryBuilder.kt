@@ -41,9 +41,29 @@ class LibraryBuilder {
         layerKeys.size - 1
     }
 
+    private val layerIndexByName = HashMap<String, Int>()
+
+    /**
+     * Index of the named layer [name] (DXF layers). Names longer than [MAX_LAYER_NAME] characters
+     * are cut. A name that is a whole number from 0 to 65535 without leading zeros (e.g. "83") also
+     * gets that layer number, see [LayerKey].
+     */
+    fun layerIndex(name: String): Int {
+        val key = if (name.length > MAX_LAYER_NAME) name.substring(0, MAX_LAYER_NAME) else name
+        return layerIndexByName.getOrPut(key) {
+            if (layerKeys.size >= MAX_LAYERS) throw GdsFormatException("The file uses more than $MAX_LAYERS layers")
+            val number = key.toIntOrNull()?.takeIf { it in 0..0xFFFF && it.toString() == key } ?: -1
+            layerKeys += LayerKey(number, 0, key)
+            layerKeys.size - 1
+        }
+    }
+
     companion object {
-        /** Most distinct layer/datatype pairs a file may use. */
+        /** Most distinct layers (layer/datatype pairs or names) a file may use. */
         const val MAX_LAYERS = 10_000
+
+        /** Longest layer name kept (DXF allows 255 characters). */
+        const val MAX_LAYER_NAME = 255
     }
 
     /** Builds the library. The builder must not be used afterwards. */
