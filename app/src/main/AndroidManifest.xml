@@ -27,7 +27,7 @@
             </intent-filter>
 
             <!-- Filter A: "Open with" by MIME type. File managers and mail apps usually report
-                 unknown extensions such as .gds as application/octet-stream; .gds.gz is gzip. -->
+                 unknown extensions such as .gds or .dxf as application/octet-stream; .gds.gz is gzip. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -38,6 +38,10 @@
                 <data android:mimeType="application/vnd.gds" />
                 <data android:mimeType="application/gzip" />
                 <data android:mimeType="application/x-gzip" />
+                <data android:mimeType="image/vnd.dxf" />
+                <data android:mimeType="image/x-dxf" />
+                <data android:mimeType="application/dxf" />
+                <data android:mimeType="application/x-dxf" />
             </intent-filter>
 
             <!-- Filter B: "Open with" by file name. Some apps send the generic type */*, so we
@@ -67,13 +71,23 @@
                 <data android:pathPattern=".*\\..*\\.GDS\\.GZ" />
                 <data android:pathPattern=".*\\..*\\..*\\.GDS\\.GZ" />
                 <data android:pathPattern=".*\\..*\\..*\\..*\\.GDS\\.GZ" />
+                <data android:pathPattern=".*\\.dxf" />
+                <data android:pathPattern=".*\\..*\\.dxf" />
+                <data android:pathPattern=".*\\..*\\..*\\.dxf" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.dxf" />
+                <data android:pathPattern=".*\\.DXF" />
+                <data android:pathPattern=".*\\..*\\.DXF" />
+                <data android:pathPattern=".*\\..*\\..*\\.DXF" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.DXF" />
                 <data tools:ignore="UnusedAttribute" android:pathSuffix=".gds" />
                 <data tools:ignore="UnusedAttribute" android:pathSuffix=".GDS" />
                 <data tools:ignore="UnusedAttribute" android:pathSuffix=".gds.gz" />
                 <data tools:ignore="UnusedAttribute" android:pathSuffix=".GDS.GZ" />
+                <data tools:ignore="UnusedAttribute" android:pathSuffix=".dxf" />
+                <data tools:ignore="UnusedAttribute" android:pathSuffix=".DXF" />
             </intent-filter>
 
-            <!-- Filter C: "Share to" - lets other apps send a GDSII file to this viewer. -->
+            <!-- Filter C: "Share to" - lets other apps send a GDSII or DXF file to this viewer. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -83,6 +97,10 @@
                 <data android:mimeType="application/vnd.gds" />
                 <data android:mimeType="application/gzip" />
                 <data android:mimeType="application/x-gzip" />
+                <data android:mimeType="image/vnd.dxf" />
+                <data android:mimeType="image/x-dxf" />
+                <data android:mimeType="application/dxf" />
+                <data android:mimeType="application/x-dxf" />
             </intent-filter>
         </activity>
     </application>

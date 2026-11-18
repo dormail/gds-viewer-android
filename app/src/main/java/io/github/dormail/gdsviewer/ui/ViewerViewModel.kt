@@ -14,7 +14,7 @@ import io.github.dormail.gdsviewer.data.RecentFile
 import io.github.dormail.gdsviewer.data.ThemeMode
 import io.github.dormail.gdsviewer.ui.theme.LayerPalette
 import io.github.dormail.gdsviewer.data.RecentFiles
-import io.github.dormail.gdsviewer.db.GdsReader
+import io.github.dormail.gdsviewer.db.LayoutReader
 import io.github.dormail.gdsviewer.db.Library
 import io.github.dormail.gdsviewer.gds.LayerKey
 import io.github.dormail.gdsviewer.geometry.Affine
@@ -190,7 +190,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 val start = SystemClock.elapsedRealtime()
                 val lib = withContext(Dispatchers.IO) {
                     open().use { input ->
-                        GdsReader.read(input, isCancelled = { !isActive }) { bytes ->
+                        LayoutReader.read(input, isCancelled = { !isActive }) { bytes ->
                             state = ViewerState.Loading("Reading $name… ${bytes shr 20} MB")
                         }
                     }

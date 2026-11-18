@@ -166,7 +166,7 @@ fun LayoutViewer(vm: ViewerViewModel) {
                 renderer.background = canvasColorInt(dark)
                 renderer.fillAlpha = LayerPalette.fillAlpha(dark)
                 renderer.styles = vm.layers.map {
-                    SceneLayerStyle(it.layer, LayerPalette.color(it.paletteIndex, dark), it.visible)
+                    SceneLayerStyle(it.layer, LayerPalette.color(it.key, it.paletteIndex, dark), it.visible)
                 }
                 renderer.view = vm.view
                 glView.requestRender()

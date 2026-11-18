@@ -37,7 +37,7 @@ fun AboutDialog(onDismiss: () -> Unit) {
                 if (version.isNotEmpty()) {
                     Text("Version $version", style = MaterialTheme.typography.titleSmall)
                 }
-                Text("A read-only viewer for GDSII chip layouts.", Modifier.padding(top = 8.dp))
+                Text("A read-only viewer for GDSII and DXF chip layouts.", Modifier.padding(top = 8.dp))
                 Text("Made by Matthias Maile.", Modifier.padding(top = 8.dp))
                 Text(
                     "Built entirely with Claude, Anthropic's AI coding assistant. The author is a researcher " +

@@ -154,7 +154,7 @@ fun ViewerScreen(vm: ViewerViewModel = viewModel()) {
                         painterResource(R.drawable.ic_folder_open), contentDescription = null,
                         modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text("Open a GDSII layout (.gds or .gds.gz)", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
+                    Text("Open a GDS or DXF layout (.gds, .gds.gz or .dxf)", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
                     Button(onClick = openFile) { Text("Open file") }
                     OutlinedButton(onClick = { vm.openSample() }) { Text("Try the sample layout") }
                 }

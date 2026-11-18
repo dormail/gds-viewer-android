@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import io.github.dormail.gdsviewer.ui.theme.LayerPalette
 import io.github.dormail.gdsviewer.ui.theme.LocalDarkTheme
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import java.text.NumberFormat
 
 /** Bottom sheet listing all layers: tap toggles visibility, long-press shows only that layer. */
@@ -58,7 +59,7 @@ fun LayerSheet(vm: ViewerViewModel, onDismiss: () -> Unit) {
         LazyColumn {
             items(vm.layers, key = { it.key.toString() }) { layer ->
                 val dark = LocalDarkTheme.current
-                val color = Color(LayerPalette.color(layer.paletteIndex, dark))
+                val color = Color(LayerPalette.color(layer.key, layer.paletteIndex, dark))
                 ListItem(
                     modifier = Modifier.combinedClickable(
                         onClick = { vm.toggleLayer(layer.key) },
@@ -74,7 +75,7 @@ fun LayerSheet(vm: ViewerViewModel, onDismiss: () -> Unit) {
                                 .border(2.dp, color, RoundedCornerShape(4.dp)),
                         )
                     },
-                    headlineContent = { Text("Layer ${layer.key.layer}/${layer.key.datatype}") },
+                    headlineContent = { Text("Layer ${layer.key}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     supportingContent = { Text("${numbers.format(layer.shapeCount)} shapes") },
                     trailingContent = { Checkbox(checked = layer.visible, onCheckedChange = null) },
                 )

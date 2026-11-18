@@ -1,5 +1,7 @@
 package io.github.dormail.gdsviewer.ui.theme
 
+import io.github.dormail.gdsviewer.gds.LayerKey
+
 /**
  * Layer colors. A layer stores only its index; the color depends on the theme: lighter shades
  * on the dark canvas, darker shades (same hue family, same index) on the light canvas.
@@ -25,4 +27,46 @@ object LayerPalette {
 
     /** Opacity of the shape fill (outlines are always opaque). */
     fun fillAlpha(dark: Boolean): Float = if (dark) 0.4f else 0.35f
+
+    // Viridis colour map (perceptually ordered: dark purple -> blue -> green -> yellow), given as
+    // nine evenly spaced control points; colours in between are mixed linearly.
+    private val VIRIDIS = intArrayOf(
+        0xFF440154.toInt(), 0xFF472D7B.toInt(), 0xFF3B528B.toInt(), 0xFF2C728E.toInt(),
+        0xFF21918C.toInt(), 0xFF28AE80.toInt(), 0xFF5EC962.toInt(), 0xFFADDC30.toInt(),
+        0xFFFDE725.toInt(),
+    )
+
+    /**
+     * The gray value 0..255 of a layer, if it is a DXF layer whose name is a whole number in that
+     * range (gray-scale lithography files), otherwise null.
+     */
+    fun grayValue(key: LayerKey): Int? =
+        if (key.name != null && key.layer in 0..255) key.layer else null
+
+    /**
+     * Colour for gray value [value] (0 = dark end, 255 = bright end of the colour map). The ends
+     * are pulled in a little so they stay visible on the canvas: the dark end is lifted on the
+     * dark canvas, the yellow end is darkened on the light canvas.
+     */
+    fun grayColor(value: Int, dark: Boolean): Int {
+        val v = value.coerceIn(0, 255) / 255f
+        val t = if (dark) 0.12f + 0.88f * v else 0.9f * v
+        val pos = t * (VIRIDIS.size - 1)
+        val i = pos.toInt().coerceAtMost(VIRIDIS.size - 2)
+        val f = pos - i
+        val a = VIRIDIS[i]
+        val b = VIRIDIS[i + 1]
+        fun mix(shift: Int): Int {
+            val x = (a shr shift) and 0xFF
+            val y = (b shr shift) and 0xFF
+            return (x + (y - x) * f + 0.5f).toInt().coerceIn(0, 255)
+        }
+        return (0xFF shl 24) or (mix(16) shl 16) or (mix(8) shl 8) or mix(0)
+    }
+
+    /** Colour of a layer: from the gray value if it has one, otherwise from the palette. */
+    fun color(key: LayerKey, paletteIndex: Int, dark: Boolean): Int {
+        val gray = grayValue(key)
+        return if (gray != null) grayColor(gray, dark) else color(paletteIndex, dark)
+    }
 }
